@@ -1,0 +1,47 @@
+{
+  "name": "github-pr-reviewer",
+  "version": "1.0.0",
+  "description": "A GitHub App that automatically reviews pull requests",
+  "main": "index.js",
+  "scripts": {
+    "start": "probot run ./index.js",
+    "dev": "nodemon --exec \"npm start\"",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
+    "test:ci": "jest --ci --runInBand --coverage"
+  },
+  "keywords": [
+    "github",
+    "probot",
+    "github-app",
+    "code-review"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@google-cloud/vertexai": "^0.5.0",
+    "@octokit/rest": "^18.12.0",
+    "@octokit/webhooks": "^9.0.0",
+    "dotenv": "^16.0.3",
+    "p-limit": "^4.0.0",
+    "probot": "^12.2.8"
+  },
+  "engines": {
+    "node": ">= 14.0.0",
+    "npm": ">= 6.0.0"
+  },
+  "devDependencies": {
+    "@types/jest": "^29.5.12",
+    "@types/nock": "^13.5.4",
+    "@types/node": "^20.11.30",
+    "eslint": "^8.56.0",
+    "eslint-plugin-github": "^4.10.1",
+    "eslint-plugin-jest": "^27.6.0",
+    "jest": "^29.7.0",
+    "nock": "^13.5.0",
+    "nodemon": "^3.1.0",
+    "smee-client": "^1.2.3",
+    "ts-jest": "^29.1.2"
+  }
+}
