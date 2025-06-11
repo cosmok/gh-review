@@ -440,16 +440,22 @@ async function processReviewCommand(octokit, owner, repo, pr, files) {
     });
     reviewComment = comment;
 
+    console.log('[TEST_DEBUG] processReviewCommand: files received:', JSON.stringify(files, null, 2));
+
     // Filter out binary and removed files
     const filesToProcess = files.filter(file => {
       if (file.status === 'removed') return false;
       return !file.filename.match(/\.(png|jpg|jpeg|gif|ico|svg|pdf|zip|tar\.gz|tgz|gz|7z|rar|exe|dll|so|a|o|pyc|pyo|pyd|class|jar|war|ear|bin|dat|db|sqlite|sqlite3)$/i);
     });
 
+    console.log('[TEST_DEBUG] processReviewCommand: filesToProcess:', JSON.stringify(filesToProcess, null, 2));
+
     // Process files with rate limiting
     const processFile = async (file) => {
+      console.log('[TEST_DEBUG] processFile entered for:', file.filename);
       try {
         const fileDiff = await processFileDiff(octokit, owner, repo, file, pr);
+        console.log('[TEST_DEBUG] processFileDiff result:', JSON.stringify(fileDiff, null, 2));
         if (!fileDiff || fileDiff.error) {
           return { filename: file.filename, status: 'error', error: fileDiff?.error };
         }
@@ -481,8 +487,13 @@ async function processReviewCommand(octokit, owner, repo, pr, files) {
     };
 
     // Process files in parallel with concurrency limit
-    const processQueue = filesToProcess.map(file => limit(() => processFile(file)));
+    const processQueue = filesToProcess.map(file => {
+      console.log('[TEST_DEBUG] processReviewCommand: mapping file to limit queue:', file.filename);
+      return limit(() => processFile(file));
+    });
     const results = await Promise.all(processQueue);
+
+    console.log('[TEST_DEBUG] processReviewCommand: results from Promise.all:', JSON.stringify(results, null, 2));
 
     // Generate review summary
     const successfulReviews = results.filter(r => r.status === 'reviewed' && r.analysis);
