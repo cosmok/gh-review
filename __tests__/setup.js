@@ -1,5 +1,6 @@
 // Mock environment variables
 process.env.APP_ID = '123456';
+process.env.PRIVATE_KEY = 'test-private-key';
 process.env.WEBHOOK_SECRET = 'test-secret';
 process.env.GOOGLE_CLOUD_PROJECT = 'test-project';
 process.env.GOOGLE_CLOUD_LOCATION = 'us-central1';
@@ -25,4 +26,13 @@ jest.mock('@google-cloud/vertexai', () => {
       }
     }))
   };
+});
+
+// Mock p-limit to execute functions immediately
+jest.mock('p-limit', () => {
+  return jest.fn(() => {
+    return async (fn) => { // Make the limiter function async
+      return Promise.resolve(fn()); // Ensure it returns a promise that resolves with fn's result
+    };
+  });
 });
