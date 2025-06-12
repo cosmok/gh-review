@@ -161,6 +161,28 @@ describe('Command Handlers', () => {
         'PR Summary'
       );
     });
+
+    it('should handle /what when pulls.get returns a string diff', async () => {
+      const diffString = 'diff --git a/app.js b/app.js\n@@ -1 +1 @@\n-console.log("old")\n+console.log("new")';
+      mockOctokit.pulls.get.mockResolvedValue({ data: diffString });
+
+      const mockAnalyze = jest.fn().mockResolvedValue('String diff summary');
+
+      await processWhatCommand(
+        mockOctokit,
+        mockOwner,
+        mockRepo,
+        mockPr,
+        globalMockFiles,
+        { analyzeWithAIDep: mockAnalyze }
+      );
+
+      expect(mockAnalyze).toHaveBeenCalledWith(
+        expect.stringContaining('# PR Summary Request'),
+        diffString,
+        'PR Summary'
+      );
+    });
   });
 
   describe('Issue Comment Event via Probot', () => {
