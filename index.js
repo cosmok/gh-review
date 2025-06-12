@@ -73,7 +73,19 @@ async function analyzeWithAI(prompt, codeSnippet, filePath, context = '') {
       structuredLog('WARNING', 'AI analysis timed out', { filePath });
       return 'Analysis timed out. The diff might be too large or the service might be busy.';
     }
-    structuredLog('ERROR', 'Error in analyzeWithAI', { filePath, error: error.message });
+    let message = error.message || 'Unknown error';
+    if (message.includes('Unexpected token') && message.includes('<')) {
+      message = 'Vertex AI returned an invalid response. Check your credentials and network settings.';
+    }
+    const previewSource = error.response?.data || error.stack || '';
+    const preview = typeof previewSource === 'string'
+      ? previewSource.split('\n').slice(0, 3).join('\n')
+      : '';
+    structuredLog('ERROR', 'Error in analyzeWithAI', {
+      filePath,
+      error: message,
+      preview: preview || undefined,
+    });
     return null;
   }
 }
@@ -347,22 +359,6 @@ function createProbotApp(config = {}) {
     privateKey: finalPrivateKey.replace(/\\n/g, '\n'),
     webhookSecret: finalWebhookSecret,
   });
-}
-
-// --- createProbotApp Function Definition ---
-function createProbotApp(config = {}) {
-  const finalAppId = config.appId || process.env.APP_ID;
-  const finalPrivateKey = (config.privateKey || process.env.PRIVATE_KEY || ''); // Ensure it's a string
-  const finalWebhookSecret = config.webhookSecret || process.env.WEBHOOK_SECRET;
-
-  // The .replace is crucial if PRIVATE_KEY env var has escaped newlines
-  const probot = new Probot({
-    appId: finalAppId,
-    privateKey: finalPrivateKey.replace(/\\n/g, '\n'),
-    webhookSecret: finalWebhookSecret,
-  });
-
-  registerEventHandlers(probot);
 
   registerEventHandlers(probot);
 
