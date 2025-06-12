@@ -347,6 +347,22 @@ function createProbotApp(config = {}) {
     privateKey: finalPrivateKey.replace(/\\n/g, '\n'),
     webhookSecret: finalWebhookSecret,
   });
+}
+
+// --- createProbotApp Function Definition ---
+function createProbotApp(config = {}) {
+  const finalAppId = config.appId || process.env.APP_ID;
+  const finalPrivateKey = (config.privateKey || process.env.PRIVATE_KEY || ''); // Ensure it's a string
+  const finalWebhookSecret = config.webhookSecret || process.env.WEBHOOK_SECRET;
+
+  // The .replace is crucial if PRIVATE_KEY env var has escaped newlines
+  const probot = new Probot({
+    appId: finalAppId,
+    privateKey: finalPrivateKey.replace(/\\n/g, '\n'),
+    webhookSecret: finalWebhookSecret,
+  });
+
+  registerEventHandlers(probot);
 
   registerEventHandlers(probot);
 
