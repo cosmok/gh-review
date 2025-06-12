@@ -260,20 +260,8 @@ async function processReviewCommand(octokit, owner, repo, pr, files, dependencie
   }
 }
 
-// --- createProbotApp Function Definition ---
-function createProbotApp(config = {}) {
-  const finalAppId = config.appId || process.env.APP_ID;
-  const finalPrivateKey = (config.privateKey || process.env.PRIVATE_KEY || ''); // Ensure it's a string
-  const finalWebhookSecret = config.webhookSecret || process.env.WEBHOOK_SECRET;
-
-  // The .replace is crucial if PRIVATE_KEY env var has escaped newlines
-  const probot = new Probot({
-    appId: finalAppId,
-    privateKey: finalPrivateKey.replace(/\\n/g, '\n'),
-    webhookSecret: finalWebhookSecret,
-  });
-
-  // --- Event Handlers ---
+// --- registerEventHandlers attaches all Probot event handlers ---
+function registerEventHandlers(probot) {
   probot.on('issue_comment.created', async (context) => {
     const { comment, issue, repository } = context.payload;
     const { body } = comment;
@@ -334,21 +322,34 @@ function createProbotApp(config = {}) {
   probot.onError((error) => {
     console.error('App error:', error);
   });
+}
+
+// --- createProbotApp Function Definition ---
+function createProbotApp(config = {}) {
+  const finalAppId = config.appId || process.env.APP_ID;
+  const finalPrivateKey = (config.privateKey || process.env.PRIVATE_KEY || ''); // Ensure it's a string
+  const finalWebhookSecret = config.webhookSecret || process.env.WEBHOOK_SECRET;
+
+  // The .replace is crucial if PRIVATE_KEY env var has escaped newlines
+  const probot = new Probot({
+    appId: finalAppId,
+    privateKey: finalPrivateKey.replace(/\\n/g, '\n'),
+    webhookSecret: finalWebhookSecret,
+  });
+
+  registerEventHandlers(probot);
 
   return probot;
 }
 
-// Initialize the global app instance using the factory
+// Initialize the global app instance using the factory for tests
 const app = createProbotApp();
 console.log('✅ Probot App created and event handlers registered.');
 
-
-// Only start the server if this file is run directly
+// Start the Probot server when run directly
 if (require.main === module) {
-  const port = process.env.PORT || 3000;
-  app.start().then(() => {
-    console.log(`GitHub App is running on port ${port}`);
-  }).catch(error => {
+  const { run } = require('probot');
+  run(registerEventHandlers).catch(error => {
     console.error("Failed to start Probot app:", error);
     process.exit(1);
   });
@@ -358,6 +359,7 @@ if (require.main === module) {
 module.exports = {
   app, // The global app instance
   createProbotApp, // The factory function
+  registerEventHandlers,
   processFileDiff,
   processWhatCommand,
   processReviewCommand,

@@ -48,6 +48,7 @@ A GitHub App that uses Google's Vertex AI with Gemini to provide intelligent cod
    ```bash
    npm start
    ```
+   This command now runs `node index.js` under the hood.
 
    For development with auto-reload:
    ```bash
@@ -68,6 +69,11 @@ You can deploy this app to any Node.js hosting platform like:
 - AWS Lambda
 - Google Cloud Run
 - Google Cloud Functions
+
+### Google Cloud Run
+
+1. Build and deploy your container image as you normally would.
+2. Ensure the container executes `npm start` (which runs `node index.js`).
 
 Make sure to set the environment variables in your hosting platform's configuration.
 
