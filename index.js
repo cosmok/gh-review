@@ -3,7 +3,7 @@ require('dotenv').config();
 const { Probot } = require('probot');
 const { Octokit } = require('@octokit/rest');
 const { VertexAI } = require('@google-cloud/vertexai');
-const pLimit = require('p-limit');
+const pLimit = require("p-limit").default || require("p-limit");
 
 // Configuration constants
 const MAX_FILE_SIZE = 100000; // 100KB max file size
@@ -203,12 +203,18 @@ async function processWhatCommand(octokit, owner, repo, pr, files, dependencies)
   }
 }
 
-async function processReviewCommand(octokit, owner, repo, pr, files, dependencies) {
+async function processReviewCommand(octokit, owner, repo, pr, files, dependencies = {}) {
   const startTime = Date.now();
+  const { initialComment } = dependencies;
   let reviewComment;
   try {
-    const { data: comment } = await octokit.issues.createComment({ owner, repo, issue_number: pr.number, body: '🔍 Starting AI code review... This may take a few minutes.' });
-    reviewComment = comment;
+    if (initialComment || octokit.__initialReviewComment) {
+      reviewComment = initialComment || octokit.__initialReviewComment;
+      delete octokit.__initialReviewComment;
+    } else {
+      const { data: comment } = await octokit.issues.createComment({ owner, repo, issue_number: pr.number, body: '🔍 Starting AI code review... This may take a few minutes.' });
+      reviewComment = comment;
+    }
     const filesToProcess = files.filter(file => {
       if (file.status === 'removed') return false;
       return !file.filename.match(/\.(png|jpg|jpeg|gif|ico|svg|pdf|zip|tar\.gz|tgz|gz|7z|rar|exe|dll|so|a|o|pyc|pyo|pyd|class|jar|war|ear|bin|dat|db|sqlite|sqlite3)$/i);
@@ -287,9 +293,24 @@ function createProbotApp(config = {}) {
       };
 
       if (body.startsWith('/what')) {
-        await processWhatCommand(octokitInstance, repoOwner, repoName, pr, files, dependencies);
+        await module.exports.processWhatCommand(octokitInstance, repoOwner, repoName, pr, files, dependencies);
       } else if (body.startsWith('/review')) {
-        await processReviewCommand(octokitInstance, repoOwner, repoName, pr, files, dependencies);
+        const { data: initialComment } = await octokitInstance.issues.createComment({
+          owner: repoOwner,
+          repo: repoName,
+          issue_number: prNumber,
+          body: '🔍 Starting AI code review... This may take a few minutes.'
+        });
+        // stash the comment on the octokit instance so the command can reuse it
+        octokitInstance.__initialReviewComment = initialComment;
+        await module.exports.processReviewCommand(
+          octokitInstance,
+          repoOwner,
+          repoName,
+          pr,
+          files,
+          dependencies
+        );
       }
     } catch (error) {
       console.error('Error processing PR comment:', error);
@@ -342,4 +363,3 @@ module.exports = {
   }
 };
 
-[end of index.js]
