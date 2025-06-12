@@ -67,8 +67,19 @@ You can deploy this app to any Node.js hosting platform like:
 - Vercel
 - AWS Lambda
 - Google Cloud Run
+- Google Cloud Functions
 
 Make sure to set the environment variables in your hosting platform's configuration.
+
+### Google Cloud Functions
+
+1. Deploy using [`function.js`](function.js) as the entry point:
+   ```bash
+   gcloud functions deploy probotApp \
+     --runtime=nodejs18 --trigger-http --entry-point=probotApp
+   ```
+2. Set all required environment variables in the function configuration.
+
 
 ## License
 
