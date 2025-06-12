@@ -6,6 +6,9 @@ const { VertexAI } = require('@google-cloud/vertexai');
 const pLimit = require("p-limit").default || require("p-limit");
 
 // Configuration constants
+function structuredLog(severity, message, fields = {}) {
+  console.log(JSON.stringify({ severity, message, ...fields }));
+}
 const MAX_FILE_SIZE = 100000; // 100KB max file size
 const MAX_DIFF_LENGTH = 8000; // Max diff length to process
 const MAX_DIFF_LINES = 500; // Max lines of diff to process per file
@@ -24,8 +27,8 @@ const requiredVars = [
 
 for (const varName of requiredVars) {
   if (!process.env[varName]) {
-    console.error(`❌ Missing required environment variable: ${varName}`);
-    process.exit(1); // This will exit if run in a context where env vars are not set (e.g. some tests)
+    structuredLog('ERROR', 'Missing required environment variable', { varName });
+    process.exit(1); // Exit if env vars are missing
   }
 }
 
@@ -41,13 +44,13 @@ try {
     location: process.env.GOOGLE_CLOUD_LOCATION,
   });
 } catch (e) {
-  console.error("Failed to initialize VertexAI, check GOOGLE_CLOUD_PROJECT and GOOGLE_CLOUD_LOCATION:", e);
+  structuredLog('ERROR', 'Failed to initialize VertexAI', { error: e.message });
   // Decide if process should exit or if this is recoverable/testable
 }
 
 
 // Initialize the AI model
-const model = 'gemini-1.5-pro';
+const model = 'gemini-2.5-flash-preview-05-20';
 
 // --- Helper functions (analyzeWithAI, truncateToLines, etc.) remain in module scope ---
 async function analyzeWithAI(prompt, codeSnippet, filePath, context = '') {
@@ -67,10 +70,10 @@ async function analyzeWithAI(prompt, codeSnippet, filePath, context = '') {
   } catch (error) {
     clearTimeout(timeoutId);
     if (error.name === 'AbortError') {
-      console.error('AI analysis timed out for ' + filePath);
+      structuredLog('WARNING', 'AI analysis timed out', { filePath });
       return 'Analysis timed out. The diff might be too large or the service might be busy.';
     }
-    console.error('Error in analyzeWithAI for ' + filePath + ':', error);
+    structuredLog('ERROR', 'Error in analyzeWithAI', { filePath, error: error.message });
     return null;
   }
 }
@@ -108,13 +111,18 @@ function getSurroundingLines(content, lineNumbers, contextLines = 10) {
 async function getFileContent(octokit, owner, repo, path, ref, options = {}) {
   const { startLine, endLine, contextLines } = options;
   try {
-    const { data } = await octokit.repos.getContent({ owner, repo, path, ref, headers: { 'accept': 'application/vnd.github.v3.raw' } });
-    if (data.size > MAX_FILE_SIZE) {
-      console.log(`File ${path} is too large (${data.size} bytes), truncating content`);
-      const content = Buffer.from(data.content, 'base64').toString('utf-8');
+    const { data } = await octokit.repos.getContent({ owner, repo, path, ref });
+    const fileSize = typeof data === 'string' ? Buffer.byteLength(data) : data.size;
+    if (fileSize > MAX_FILE_SIZE) {
+      structuredLog('INFO', 'Truncating large file', { path, fileSize });
+      let content = typeof data === 'string'
+        ? data
+        : Buffer.from(data.content, data.encoding || 'base64').toString('utf-8');
       return content.substring(0, MAX_FILE_SIZE) + '\n[...truncated due to size...]';
     }
-    let content = Buffer.from(data.content, 'base64').toString('utf-8');
+    let content = typeof data === 'string'
+      ? data
+      : Buffer.from(data.content, data.encoding || 'base64').toString('utf-8');
     if (startLine !== undefined && endLine !== undefined) {
       const lines = content.split('\n');
       const start = Math.max(0, startLine - contextLines - 1);
@@ -125,8 +133,11 @@ async function getFileContent(octokit, owner, repo, path, ref, options = {}) {
     }
     return content;
   } catch (error) {
-    if (error.status === 404) console.log(`File not found: ${path} at ${ref}`);
-    else console.error(`Error getting file content for ${path}:`, error.message);
+    if (error.status === 404) {
+      structuredLog('INFO', 'File not found', { path, ref });
+    } else {
+      structuredLog('ERROR', 'Error getting file content', { path, error: error.message });
+    }
     return error.status === 404 ? '[File not found or deleted]' : `[Error retrieving file: ${error.message}]`;
   }
 }
@@ -177,7 +188,7 @@ async function processFileDiff(octokit, owner, repo, file, pr) {
     fileInfo.processingTime = Date.now() - startTime;
     return fileInfo;
   } catch (error) {
-    console.error(`Error processing diff for ${file.filename}:`, error);
+    structuredLog('ERROR', 'Error processing file diff', { file: file.filename, error: error.message });
     fileInfo.error = `Processing error: ${error.message}`;
     fileInfo.processingTime = Date.now() - startTime;
     return fileInfo;
@@ -192,7 +203,7 @@ async function processWhatCommand(octokit, owner, repo, pr, files, dependencies 
   } = dependencies;
   try {
     const { data } = await octokit.pulls.get({ owner, repo, pull_number: pr.number, mediaType: { format: 'diff' } })
-      .catch(error => { console.error('Error getting PR diff:', error); throw new Error('Failed to retrieve PR diff.'); });
+      .catch(error => { structuredLog('ERROR', 'Error getting PR diff', { error: error.message }); throw new Error('Failed to retrieve PR diff.'); });
     const diff = typeof data === 'string' ? data : data.diff;
     
     const prompt = `# PR Summary Request\n\n## PR Details\n- Title: ${pr.title}\n- Author: ${pr.user?.login || 'Unknown'}\n- Changed Files: ${files.length} files with ${files.reduce((a, f) => a + f.changes, 0)} changes\n\n## Instructions\nPlease provide a concise summary of the changes in this pull request.\nFocus on the main purpose and key changes. Be brief and to the point.\nHighlight any major architectural changes or potential impacts.`;
@@ -202,7 +213,7 @@ async function processWhatCommand(octokit, owner, repo, pr, files, dependencies 
       await octokit.issues.updateComment({ owner, repo, comment_id: comment.id, body: `## 📝 PR Summary\n\n${analysis}\n\n_Summary generated by AI - [Feedback?](https://github.com/your-org/feedback/issues)_` });
     }
   } catch (error) {
-    console.error('Error in processWhatCommand:', error);
+    structuredLog('ERROR', 'Error in processWhatCommand', { error: error.message });
     await octokit.issues.createComment({ owner, repo, issue_number: pr.number, body: `❌ Error generating PR summary: ${error.message || 'Unknown error'}` });
   }
 }
@@ -234,7 +245,7 @@ async function processReviewCommand(octokit, owner, repo, pr, files, dependencie
         const prompt = `# Code Review Request\n\n## File: ${file.filename} (${file.status})\nChanges: ${file.changes} (${file.additions}+ ${file.deletions}-)\n\n## Review Guidelines\n1. Focus on the changes shown in the diff\n2. Check for bugs, security issues, and performance concerns\n3. Suggest improvements for code quality and best practices\n4. Only report issues you're certain about\n5. Reference specific line numbers from the diff\n\n## Context\n${fileDiff.context ? truncateToLines(fileDiff.context, 100) : 'No context available'}\n\n## Changes\n\`\`\`diff\n${fileDiff.diff}\n\`\`\``;
         const analysis = await analyzeWithAIDep(prompt, fileDiff.diff, file.filename, fileDiff.context);
         return { filename: file.filename, status: analysis ? 'reviewed' : 'error', analysis, error: analysis ? null : 'Failed to analyze file' };
-      } catch (error) { console.error(`Error processing ${file.filename}:`, error); return { filename: file.filename, status: 'error', error: error.message }; }
+      } catch (error) { structuredLog('ERROR', 'Error processing file', { file: file.filename, error: error.message }); return { filename: file.filename, status: 'error', error: error.message }; }
     };
     const results = await Promise.all(filesToProcess.map(file => limit(() => processFile(file))));
     const successfulReviews = results.filter(r => r.status === 'reviewed' && r.analysis);
@@ -250,30 +261,18 @@ async function processReviewCommand(octokit, owner, repo, pr, files, dependencie
     reviewBody += '---\n🔍 This is an automated review powered by Google Vertex AI.\n⚠️ This is a best-effort review and may not catch all issues.\n🔍 Always perform your own thorough review before merging.\n⏱️ Total processing time: ' + processingTime.toFixed(1) + 's';
     await octokit.issues.updateComment({ owner, repo, comment_id: reviewComment.id, body: reviewBody });
   } catch (error) {
-    console.error('Error in processReviewCommand:', error);
+    structuredLog('ERROR', 'Error in processReviewCommand', { error: error.message });
     try {
       const errorMessage = error.message || 'Unknown error occurred';
       const errorBody = `## ❌ Error During Review\n\nAn error occurred while processing your review request:\n\n\`\`\`\n${errorMessage}\n\`\`\`\n\nPlease try again later or contact support if the issue persists.`;
       if (reviewComment) await octokit.issues.updateComment({ owner, repo, comment_id: reviewComment.id, body: errorBody });
       else await octokit.issues.createComment({ owner, repo, issue_number: pr.number, body: errorBody });
-    } catch (updateError) { console.error('Failed to post error comment:', updateError); }
+    } catch (updateError) { structuredLog('ERROR', 'Failed to post error comment', { error: updateError.message }); }
   }
 }
 
-// --- createProbotApp Function Definition ---
-function createProbotApp(config = {}) {
-  const finalAppId = config.appId || process.env.APP_ID;
-  const finalPrivateKey = (config.privateKey || process.env.PRIVATE_KEY || ''); // Ensure it's a string
-  const finalWebhookSecret = config.webhookSecret || process.env.WEBHOOK_SECRET;
-
-  // The .replace is crucial if PRIVATE_KEY env var has escaped newlines
-  const probot = new Probot({
-    appId: finalAppId,
-    privateKey: finalPrivateKey.replace(/\\n/g, '\n'),
-    webhookSecret: finalWebhookSecret,
-  });
-
-  // --- Event Handlers ---
+// --- registerEventHandlers attaches all Probot event handlers ---
+function registerEventHandlers(probot) {
   probot.on('issue_comment.created', async (context) => {
     const { comment, issue, repository } = context.payload;
     const { body } = comment;
@@ -321,35 +320,48 @@ function createProbotApp(config = {}) {
         );
       }
     } catch (error) {
-      console.error('Error processing PR comment:', error);
+      structuredLog('ERROR', 'Error processing PR comment', { error: error.message });
       await octokitInstance.issues.createComment({ owner: repoOwner, repo: repoName, issue_number: prNumber, body: '❌ An error occurred while processing your request.' });
     }
   });
 
   probot.on('installation.created', async (context) => {
-    const { installation, repositories = [] } = context.payload;
-    console.log(`App installed on ${repositories.length} repositories`);
+    const { repositories = [] } = context.payload;
+    structuredLog('INFO', 'App installed', { repositories: repositories.length });
   });
 
   probot.onError((error) => {
-    console.error('App error:', error);
+    structuredLog('ERROR', 'App error', { error: error.message });
   });
+}
+
+// --- createProbotApp Function Definition ---
+function createProbotApp(config = {}) {
+  const finalAppId = config.appId || process.env.APP_ID;
+  const finalPrivateKey = (config.privateKey || process.env.PRIVATE_KEY || ''); // Ensure it's a string
+  const finalWebhookSecret = config.webhookSecret || process.env.WEBHOOK_SECRET;
+
+  // The .replace is crucial if PRIVATE_KEY env var has escaped newlines
+  const probot = new Probot({
+    appId: finalAppId,
+    privateKey: finalPrivateKey.replace(/\\n/g, '\n'),
+    webhookSecret: finalWebhookSecret,
+  });
+
+  registerEventHandlers(probot);
 
   return probot;
 }
 
-// Initialize the global app instance using the factory
+// Initialize the global app instance using the factory for tests
 const app = createProbotApp();
-console.log('✅ Probot App created and event handlers registered.');
+structuredLog('INFO', 'Probot app initialized');
 
-
-// Only start the server if this file is run directly
+// Start the Probot server when run directly
 if (require.main === module) {
-  const port = process.env.PORT || 3000;
-  app.start().then(() => {
-    console.log(`GitHub App is running on port ${port}`);
-  }).catch(error => {
-    console.error("Failed to start Probot app:", error);
+  const { run } = require('probot');
+  run(registerEventHandlers).catch(error => {
+    structuredLog('ERROR', 'Failed to start Probot app', { error: error.message });
     process.exit(1);
   });
 }
@@ -358,6 +370,7 @@ if (require.main === module) {
 module.exports = {
   app, // The global app instance
   createProbotApp, // The factory function
+  registerEventHandlers,
   processFileDiff,
   processWhatCommand,
   processReviewCommand,
