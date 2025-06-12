@@ -108,13 +108,18 @@ function getSurroundingLines(content, lineNumbers, contextLines = 10) {
 async function getFileContent(octokit, owner, repo, path, ref, options = {}) {
   const { startLine, endLine, contextLines } = options;
   try {
-    const { data } = await octokit.repos.getContent({ owner, repo, path, ref, headers: { 'accept': 'application/vnd.github.v3.raw' } });
-    if (data.size > MAX_FILE_SIZE) {
-      console.log(`File ${path} is too large (${data.size} bytes), truncating content`);
-      const content = Buffer.from(data.content, 'base64').toString('utf-8');
+    const { data } = await octokit.repos.getContent({ owner, repo, path, ref });
+    const fileSize = typeof data === 'string' ? Buffer.byteLength(data) : data.size;
+    if (fileSize > MAX_FILE_SIZE) {
+      console.log(`File ${path} is too large (${fileSize} bytes), truncating content`);
+      let content = typeof data === 'string'
+        ? data
+        : Buffer.from(data.content, data.encoding || 'base64').toString('utf-8');
       return content.substring(0, MAX_FILE_SIZE) + '\n[...truncated due to size...]';
     }
-    let content = Buffer.from(data.content, 'base64').toString('utf-8');
+    let content = typeof data === 'string'
+      ? data
+      : Buffer.from(data.content, data.encoding || 'base64').toString('utf-8');
     if (startLine !== undefined && endLine !== undefined) {
       const lines = content.split('\n');
       const start = Math.max(0, startLine - contextLines - 1);
@@ -260,20 +265,8 @@ async function processReviewCommand(octokit, owner, repo, pr, files, dependencie
   }
 }
 
-// --- createProbotApp Function Definition ---
-function createProbotApp(config = {}) {
-  const finalAppId = config.appId || process.env.APP_ID;
-  const finalPrivateKey = (config.privateKey || process.env.PRIVATE_KEY || ''); // Ensure it's a string
-  const finalWebhookSecret = config.webhookSecret || process.env.WEBHOOK_SECRET;
-
-  // The .replace is crucial if PRIVATE_KEY env var has escaped newlines
-  const probot = new Probot({
-    appId: finalAppId,
-    privateKey: finalPrivateKey.replace(/\\n/g, '\n'),
-    webhookSecret: finalWebhookSecret,
-  });
-
-  // --- Event Handlers ---
+// --- registerEventHandlers attaches all Probot event handlers ---
+function registerEventHandlers(probot) {
   probot.on('issue_comment.created', async (context) => {
     const { comment, issue, repository } = context.payload;
     const { body } = comment;
@@ -334,21 +327,34 @@ function createProbotApp(config = {}) {
   probot.onError((error) => {
     console.error('App error:', error);
   });
+}
+
+// --- createProbotApp Function Definition ---
+function createProbotApp(config = {}) {
+  const finalAppId = config.appId || process.env.APP_ID;
+  const finalPrivateKey = (config.privateKey || process.env.PRIVATE_KEY || ''); // Ensure it's a string
+  const finalWebhookSecret = config.webhookSecret || process.env.WEBHOOK_SECRET;
+
+  // The .replace is crucial if PRIVATE_KEY env var has escaped newlines
+  const probot = new Probot({
+    appId: finalAppId,
+    privateKey: finalPrivateKey.replace(/\\n/g, '\n'),
+    webhookSecret: finalWebhookSecret,
+  });
+
+  registerEventHandlers(probot);
 
   return probot;
 }
 
-// Initialize the global app instance using the factory
+// Initialize the global app instance using the factory for tests
 const app = createProbotApp();
 console.log('✅ Probot App created and event handlers registered.');
 
-
-// Only start the server if this file is run directly
+// Start the Probot server when run directly
 if (require.main === module) {
-  const port = process.env.PORT || 3000;
-  app.start().then(() => {
-    console.log(`GitHub App is running on port ${port}`);
-  }).catch(error => {
+  const { run } = require('probot');
+  run(registerEventHandlers).catch(error => {
     console.error("Failed to start Probot app:", error);
     process.exit(1);
   });
@@ -358,6 +364,7 @@ if (require.main === module) {
 module.exports = {
   app, // The global app instance
   createProbotApp, // The factory function
+  registerEventHandlers,
   processFileDiff,
   processWhatCommand,
   processReviewCommand,
