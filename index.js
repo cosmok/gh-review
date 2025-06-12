@@ -108,13 +108,18 @@ function getSurroundingLines(content, lineNumbers, contextLines = 10) {
 async function getFileContent(octokit, owner, repo, path, ref, options = {}) {
   const { startLine, endLine, contextLines } = options;
   try {
-    const { data } = await octokit.repos.getContent({ owner, repo, path, ref, headers: { 'accept': 'application/vnd.github.v3.raw' } });
-    if (data.size > MAX_FILE_SIZE) {
-      console.log(`File ${path} is too large (${data.size} bytes), truncating content`);
-      const content = Buffer.from(data.content, 'base64').toString('utf-8');
+    const { data } = await octokit.repos.getContent({ owner, repo, path, ref });
+    const fileSize = typeof data === 'string' ? Buffer.byteLength(data) : data.size;
+    if (fileSize > MAX_FILE_SIZE) {
+      console.log(`File ${path} is too large (${fileSize} bytes), truncating content`);
+      let content = typeof data === 'string'
+        ? data
+        : Buffer.from(data.content, data.encoding || 'base64').toString('utf-8');
       return content.substring(0, MAX_FILE_SIZE) + '\n[...truncated due to size...]';
     }
-    let content = Buffer.from(data.content, 'base64').toString('utf-8');
+    let content = typeof data === 'string'
+      ? data
+      : Buffer.from(data.content, data.encoding || 'base64').toString('utf-8');
     if (startLine !== undefined && endLine !== undefined) {
       const lines = content.split('\n');
       const start = Math.max(0, startLine - contextLines - 1);
