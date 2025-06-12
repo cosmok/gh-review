@@ -30,6 +30,7 @@ A GitHub App that uses Google's Vertex AI with Gemini to provide intelligent cod
      - Contents: Read-only
    - Under "Subscribe to events", select:
      - Pull request
+     - Issue comment
      - Installation
    - Click "Create GitHub App"
    - Generate a private key and download it
