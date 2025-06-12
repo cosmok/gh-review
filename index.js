@@ -20,7 +20,6 @@ const requiredVars = [
   'WEBHOOK_SECRET',
   'GOOGLE_CLOUD_PROJECT',
   'GOOGLE_CLOUD_LOCATION',
-  'GOOGLE_APPLICATION_CREDENTIALS'
 ];
 
 for (const varName of requiredVars) {
