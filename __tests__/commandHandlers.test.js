@@ -188,7 +188,7 @@ describe('Command Handlers', () => {
   describe('Issue Comment Event via Probot', () => {
     let currentAppModuleForProbotTest; // Renamed to avoid confusion with top-level appModule
     let reviewCommandSpy;
-    // let whatCommandSpy;
+    let whatCommandSpy;
 
     beforeEach(() => {
       // process.env.PRIVATE_KEY is set in __tests__/setup.js
@@ -197,7 +197,7 @@ describe('Command Handlers', () => {
       currentAppModuleForProbotTest = require('../index.js');
 
       reviewCommandSpy = jest.spyOn(currentAppModuleForProbotTest, 'processReviewCommand').mockResolvedValue(undefined);
-      // whatCommandSpy = jest.spyOn(currentAppModuleForProbotTest, 'processWhatCommand').mockResolvedValue(undefined);
+      whatCommandSpy = jest.spyOn(currentAppModuleForProbotTest, 'processWhatCommand').mockResolvedValue(undefined);
     });
 
     it('should trigger review for /review comment by calling the spied processReviewCommand', async () => {
@@ -237,6 +237,7 @@ describe('Command Handlers', () => {
       expect(filesNock.isDone()).toBe(true);
       expect(initialCommentNock.isDone()).toBe(true);
 
+      expect(whatCommandSpy).toHaveBeenCalledTimes(1);
       expect(reviewCommandSpy).toHaveBeenCalledTimes(1);
       expect(reviewCommandSpy).toHaveBeenCalledWith(
         expect.any(Object),

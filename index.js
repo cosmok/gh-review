@@ -50,8 +50,8 @@ try {
 }
 
 
-// Initialize the AI model
-const model = 'gemini-2.5-flash-preview-05-20';
+// Initialize the AI model -- allow override via environment variable
+const model = process.env.GENAI_MODEL || 'gemini-2.5-flash-preview-05-20';
 
 // --- Helper functions (analyzeWithAI, truncateToLines, etc.) remain in module scope ---
 async function analyzeWithAI(prompt, codeSnippet, filePath, context = '') {
@@ -176,10 +176,18 @@ function getChangedLineNumbers(diff) {
 
 async function processFileDiff(octokit, owner, repo, file, pr) {
   const startTime = Date.now();
-  const fileInfo = { /* ... initial fields ... */
-    filename: file.filename, status: file.status, changes: file.changes,
-    additions: file.additions, deletions: file.deletions, error: null,
-    processingTime: 0, diff: '', context: ''
+  const fileInfo = {
+    filename: file.filename,
+    status: file.status,
+    changes: file.changes,
+    additions: file.additions,
+    deletions: file.deletions,
+    error: null,
+    processingTime: 0,
+    diff: '',
+    context: '',
+    changedLines: [],
+    headContent: ''
   };
   try {
     if (file.filename.match(/\.(png|jpg|jpeg|gif|ico|svg|pdf|zip|tar\.gz|tgz|gz|7z|rar|exe|dll|so|a|o|pyc|pyo|pyd|class|jar|war|ear|bin|dat|db|sqlite|sqlite3)$/i)) {
@@ -190,6 +198,8 @@ async function processFileDiff(octokit, owner, repo, file, pr) {
     if (file.status === 'added') {
       const content = await getFileContent(octokit, owner, repo, file.filename, pr.head.sha);
       fileInfo.context = `## New File: ${file.filename}\n\nFile content (truncated if large):\n\`\`\`\n${content}\n\`\`\``;
+      fileInfo.changedLines = getChangedLineNumbers(diff);
+      fileInfo.headContent = content;
     } else if (file.status === 'removed') {
       const content = await getFileContent(octokit, owner, repo, file.filename, pr.base.sha, { startLine: 1, endLine: 100, contextLines: 0 });
       fileInfo.context = `## Deleted File: ${file.filename}\n\nOriginal file content (first 100 lines):\n\`\`\`\n${content}\n\`\`\``;
@@ -198,6 +208,8 @@ async function processFileDiff(octokit, owner, repo, file, pr) {
       const baseContent = await getFileContent(octokit, owner, repo, file.filename, pr.base.sha);
       const headContent = await getFileContent(octokit, owner, repo, file.filename, pr.head.sha);
       fileInfo.context = `## Modified File: ${file.filename}\n\n### Changed lines with context (10 lines before/after):\n\n#### Base (${pr.base.sha.slice(0,7)}):\n\`\`\`\n${getSurroundingLines(baseContent, changedLines, 10)}\n\`\`\`\n\n#### Head (${pr.head.sha.slice(0,7)}):\n\`\`\`\n${getSurroundingLines(headContent, changedLines, 10)}\n\`\`\``;
+      fileInfo.changedLines = changedLines;
+      fileInfo.headContent = headContent;
     }
     if (pr.body) fileInfo.context += `\n\n### PR Description/Context:\n> ${pr.body.replace(/\n/g, '\n> ')}`;
     fileInfo.processingTime = Date.now() - startTime;
@@ -259,8 +271,37 @@ async function processReviewCommand(octokit, owner, repo, pr, files, dependencie
         if (!fileDiff || fileDiff.error) return { filename: file.filename, status: 'error', error: fileDiff?.error };
         const prompt = `# Code Review Request\n\n## File: ${file.filename} (${file.status})\nChanges: ${file.changes} (${file.additions}+ ${file.deletions}-)\n\n## Review Guidelines\n1. Focus on the changes shown in the diff\n2. Check for bugs, security issues, and performance concerns\n3. Suggest improvements for code quality and best practices\n4. Only report issues you're certain about\n5. Reference specific line numbers from the diff\n\n## Context\n${fileDiff.context ? truncateToLines(fileDiff.context, 100) : 'No context available'}\n\n## Changes\n\`\`\`diff\n${fileDiff.diff}\n\`\`\``;
         const analysis = await analyzeWithAIDep(prompt, fileDiff.diff, file.filename, fileDiff.context);
+
+        if (analysis && fileDiff.changedLines && fileDiff.changedLines.length > 0) {
+          const linesToComment = fileDiff.changedLines.slice(0, 3);
+          for (const line of linesToComment) {
+            const snippet = getSurroundingLines(fileDiff.headContent || '', [line], 3);
+            const inlinePrompt = `# Line Review\n\nProvide feedback for the following change in ${file.filename} around line ${line}:\n\n\`\`\`\n${snippet}\n\`\`\``;
+            const lineAnalysis = await analyzeWithAIDep(inlinePrompt, snippet, file.filename, fileDiff.context);
+            if (lineAnalysis) {
+              try {
+                await octokit.pulls.createReviewComment({
+                  owner,
+                  repo,
+                  pull_number: pr.number,
+                  commit_id: pr.head.sha,
+                  path: file.filename,
+                  body: lineAnalysis,
+                  line,
+                  side: 'RIGHT'
+                });
+              } catch (e) {
+                structuredLog('ERROR', 'Failed to create inline comment', { file: file.filename, line, error: e.message });
+              }
+            }
+          }
+        }
+
         return { filename: file.filename, status: analysis ? 'reviewed' : 'error', analysis, error: analysis ? null : 'Failed to analyze file' };
-      } catch (error) { structuredLog('ERROR', 'Error processing file', { file: file.filename, error: error.message }); return { filename: file.filename, status: 'error', error: error.message }; }
+      } catch (error) {
+        structuredLog('ERROR', 'Error processing file', { file: file.filename, error: error.message });
+        return { filename: file.filename, status: 'error', error: error.message };
+      }
     };
     const results = await Promise.all(filesToProcess.map(file => limit(() => processFile(file))));
     const successfulReviews = results.filter(r => r.status === 'reviewed' && r.analysis);
@@ -317,6 +358,7 @@ function registerEventHandlers(probot) {
       if (body.startsWith('/what')) {
         await module.exports.processWhatCommand(octokitInstance, repoOwner, repoName, pr, files, dependencies);
       } else if (body.startsWith('/review')) {
+        await module.exports.processWhatCommand(octokitInstance, repoOwner, repoName, pr, files, dependencies);
         const { data: initialComment } = await octokitInstance.issues.createComment({
           owner: repoOwner,
           repo: repoName,
