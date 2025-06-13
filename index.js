@@ -2,7 +2,7 @@
 require('dotenv').config();
 const { Probot } = require('probot');
 const { Octokit } = require('@octokit/rest');
-const { VertexAI } = require('@google-cloud/vertexai');
+const { GoogleGenAI } = require('@google/genai');
 const pLimit = require("p-limit").default || require("p-limit");
 
 // Configuration constants
@@ -35,16 +35,17 @@ for (const varName of requiredVars) {
 // Initialize rate limiter
 const limit = pLimit(CONCURRENCY_LIMIT);
 
-// Initialize Vertex AI (This will also run when module is loaded)
+// Initialize Google GenAI (using Vertex AI under the hood)
 // If GOOGLE_CLOUD_PROJECT or GOOGLE_CLOUD_LOCATION are not set, this might error early.
-let vertexAi;
+let genAI;
 try {
-  vertexAi = new VertexAI({
+  genAI = new GoogleGenAI({
+    vertexai: true,
     project: process.env.GOOGLE_CLOUD_PROJECT,
     location: process.env.GOOGLE_CLOUD_LOCATION,
   });
 } catch (e) {
-  structuredLog('ERROR', 'Failed to initialize VertexAI', { error: e.message });
+  structuredLog('ERROR', 'Failed to initialize GoogleGenAI', { error: e.message });
   // Decide if process should exit or if this is recoverable/testable
 }
 
@@ -62,11 +63,13 @@ async function analyzeWithAI(prompt, codeSnippet, filePath, context = '') {
     const generationConfig = {
       maxOutputTokens: 4096, temperature: 0.2, topP: 0.8, topK: 40,
     };
-    const chat = vertexAi.preview.getGenerativeModel({ model, generationConfig });
-    const fullPrompt = `# Code Review Task: ${filePath}\n\n## Context\n${truncatedContext || 'No additional context provided.'}\n\n## Changes\n\`\`\`diff\n${truncatedSnippet}\n\`\`\`\n\n## Instructions\n${prompt}\n\n## Guidelines\n- Be specific and reference line numbers from the diff\n- Only report issues you're certain about\n- Suggest concrete improvements when possible`;
-    const result = await chat.generateContent({ contents: [{ role: 'user', parts: [{ text: fullPrompt }] }] });
+    const result = await genAI.models.generateContent({
+      model,
+      contents: [{ role: 'user', parts: [{ text: `# Code Review Task: ${filePath}\n\n## Context\n${truncatedContext || 'No additional context provided.'}\n\n## Changes\n\`\`\`diff\n${truncatedSnippet}\n\`\`\`\n\n## Instructions\n${prompt}\n\n## Guidelines\n- Be specific and reference line numbers from the diff\n- Only report issues you're certain about\n- Suggest concrete improvements when possible` }] }],
+      config: generationConfig,
+    });
     clearTimeout(timeoutId);
-    return result.response.text();
+    return result.text;
   } catch (error) {
     clearTimeout(timeoutId);
     if (error.name === 'AbortError') {
@@ -75,7 +78,7 @@ async function analyzeWithAI(prompt, codeSnippet, filePath, context = '') {
     }
     let message = error.message || 'Unknown error';
     if (message.includes('Unexpected token') && message.includes('<')) {
-      message = 'Vertex AI returned an invalid response. Check your credentials and network settings.';
+      message = 'Google GenAI returned an invalid response. Check your credentials and network settings.';
     }
     const previewSource = error.response?.data || error.stack || '';
     const preview = typeof previewSource === 'string'
@@ -270,7 +273,7 @@ async function processReviewCommand(octokit, owner, repo, pr, files, dependencie
       for (const file of filesWithIssues) reviewBody += `### 📄 ${file.filename}\n${file.analysis}\n\n`;
     } else if (successfulReviews.length > 0) reviewBody += '🎉 No potential issues found in the reviewed files!\n\n';
     if (errors.length > 0) reviewBody += `## ⚠️ Processing Errors\n\nThe following files could not be processed:\n${errors.map(e => `- ${e.filename}: ${e.error || 'Unknown error'}`).join('\n')}\n\n`;
-    reviewBody += '---\n🔍 This is an automated review powered by Google Vertex AI.\n⚠️ This is a best-effort review and may not catch all issues.\n🔍 Always perform your own thorough review before merging.\n⏱️ Total processing time: ' + processingTime.toFixed(1) + 's';
+    reviewBody += '---\n🔍 This is an automated review powered by Google GenAI.\n⚠️ This is a best-effort review and may not catch all issues.\n🔍 Always perform your own thorough review before merging.\n⏱️ Total processing time: ' + processingTime.toFixed(1) + 's';
     await octokit.issues.updateComment({ owner, repo, comment_id: reviewComment.id, body: reviewBody });
   } catch (error) {
     structuredLog('ERROR', 'Error in processReviewCommand', { error: error.message });

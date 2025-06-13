@@ -1,10 +1,10 @@
 # AI-Powered GitHub PR Reviewer
 
-A GitHub App that uses Google's Vertex AI with Gemini to provide intelligent code reviews for pull requests.
+A GitHub App that uses Google's GenAI (Vertex AI) with Gemini to provide intelligent code reviews for pull requests.
 
 ## Features
 
-- **AI-Powered Code Review**: Uses Google's Vertex AI with Gemini to analyze code
+- **AI-Powered Code Review**: Uses Google's GenAI with Gemini to analyze code
 - **Two Simple Commands**:
   - `/what`: Provides a summary of changes in the PR
   - `/review`: Performs a comprehensive code review

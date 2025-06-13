@@ -13,17 +13,13 @@ console.log = jest.fn();
 console.error = jest.fn();
 console.warn = jest.fn();
 
-// Mock the Google Cloud VertexAI
-jest.mock('@google-cloud/vertexai', () => {
+// Mock Google GenAI library
+jest.mock('@google/genai', () => {
   return {
-    VertexAI: jest.fn().mockImplementation(() => ({
-      preview: {
-        getGenerativeModel: jest.fn().mockReturnValue({
-          generateContent: jest.fn().mockResolvedValue({
-            response: {
-              text: jest.fn().mockResolvedValue('Mock AI response')
-            }
-          })
+    GoogleGenAI: jest.fn().mockImplementation(() => ({
+      models: {
+        generateContent: jest.fn().mockResolvedValue({
+          text: 'Mock AI response'
         })
       }
     }))
