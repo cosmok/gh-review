@@ -432,12 +432,21 @@ async function processReviewCommand(octokit, owner, repo, pr, files, dependencie
 }
 
 // --- registerEventHandlers attaches all Probot event handlers ---
-function registerEventHandlers(probot) {
-  probot.on('issue_comment.created', async (context) => {
-    const { comment, issue, repository } = context.payload;
-    const { body } = comment;
-    if (!body.startsWith('/what') && !body.startsWith('/review')) return;
-    if (!issue.pull_request) return;
+function registerEventHandlers(probot, options = {}) {
+  const {
+    enableIssueComment = process.env.ENABLE_ISSUE_COMMENT_EVENT !== 'false',
+    enableLabel = process.env.ENABLE_LABEL_EVENT === 'true',
+    reviewLabel = process.env.REVIEW_TRIGGER_LABEL || 'ai-review',
+    reviewKeyword = process.env.REVIEW_COMMENT_KEYWORD || '/review',
+    summaryKeyword = process.env.SUMMARY_COMMENT_KEYWORD || '/what',
+  } = options;
+
+  if (enableIssueComment) {
+    probot.on('issue_comment.created', async (context) => {
+      const { comment, issue, repository } = context.payload;
+      const { body } = comment;
+      if (!body.startsWith(summaryKeyword) && !body.startsWith(reviewKeyword)) return;
+      if (!issue.pull_request) return;
 
     const prNumber = issue.number;
     const { name: repoName, owner } = repository;
@@ -459,9 +468,9 @@ function registerEventHandlers(probot) {
         analyzeWithAIDep: analyzeWithAI
       };
 
-      if (body.startsWith('/what')) {
+      if (body.startsWith(summaryKeyword)) {
         await module.exports.processWhatCommand(octokitInstance, repoOwner, repoName, pr, files, dependencies);
-      } else if (body.startsWith('/review')) {
+      } else if (body.startsWith(reviewKeyword)) {
         const summary = await module.exports.processWhatCommand(
           octokitInstance,
           repoOwner,
@@ -493,7 +502,45 @@ function registerEventHandlers(probot) {
       structuredLog('ERROR', 'Error processing PR comment', { error: error.message, stack: error.stack });
       await octokitInstance.issues.createComment({ owner: repoOwner, repo: repoName, issue_number: prNumber, body: '❌ An error occurred while processing your request.' });
     }
-  });
+    });
+  }
+
+  if (enableLabel) {
+    probot.on('pull_request.labeled', async (context) => {
+      const { label, pull_request: pr, repository } = context.payload;
+      if (!label || label.name !== reviewLabel) return;
+
+      const prNumber = pr.number;
+      const { name: repoName, owner } = repository;
+      const repoOwner = owner.login;
+
+      const octokitInstance = new Octokit({
+        auth: `token ${await context.octokit.apps.createInstallationAccessToken({
+          installation_id: context.payload.installation.id,
+          repository_ids: [repository.id]
+        }).then(({ data }) => data.token)}`
+      });
+
+      try {
+        const { data: fullPr } = await octokitInstance.pulls.get({ owner: repoOwner, repo: repoName, pull_number: prNumber });
+        const { data: files } = await octokitInstance.pulls.listFiles({ owner: repoOwner, repo: repoName, pull_number: prNumber });
+
+        const dependencies = { processFileDiffDep: processFileDiff, analyzeWithAIDep: analyzeWithAI };
+        const summary = await module.exports.processWhatCommand(octokitInstance, repoOwner, repoName, fullPr, files, dependencies, { returnSummary: true });
+        const { data: initialComment } = await octokitInstance.issues.createComment({
+          owner: repoOwner,
+          repo: repoName,
+          issue_number: prNumber,
+          body: '🔍 Starting AI code review... This may take a few minutes.'
+        });
+        octokitInstance.__initialReviewComment = initialComment;
+        await module.exports.processReviewCommand(octokitInstance, repoOwner, repoName, fullPr, files, dependencies, summary);
+      } catch (error) {
+        structuredLog('ERROR', 'Error processing label event', { error: error.message, stack: error.stack });
+        await octokitInstance.issues.createComment({ owner: repoOwner, repo: repoName, issue_number: prNumber, body: '❌ An error occurred while processing your request.' });
+      }
+    });
+  }
 
   probot.on('installation.created', async (context) => {
     const { repositories = [] } = context.payload;
@@ -518,7 +565,7 @@ function createProbotApp(config = {}) {
     webhookSecret: finalWebhookSecret,
   });
 
-  registerEventHandlers(probot);
+  registerEventHandlers(probot, config.eventOptions || {});
 
   return probot;
 }

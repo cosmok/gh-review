@@ -200,7 +200,7 @@ describe('Command Handlers', () => {
       whatCommandSpy = jest.spyOn(currentAppModuleForProbotTest, 'processWhatCommand').mockResolvedValue('mock summary');
     });
 
-    it('should trigger review for /review comment by calling the spied processReviewCommand', async () => {
+  it('should trigger review for /review comment by calling the spied processReviewCommand', async () => {
       const eventPayload = JSON.parse(JSON.stringify(issueCommentPayload));
       eventPayload.comment.body = '/review';
       eventPayload.issue.pull_request = { url: 'https://api.github.com/repos/test-owner/test-repo/pulls/1' };
@@ -251,6 +251,65 @@ describe('Command Handlers', () => {
         },
         expect.any(String)
       );
+  });
+  });
+
+  describe('Label Event via Probot', () => {
+    let currentAppModuleForLabelTest;
+    let reviewCommandSpy;
+    let whatCommandSpy;
+
+    beforeEach(() => {
+      process.env.ENABLE_LABEL_EVENT = 'true';
+      process.env.REVIEW_TRIGGER_LABEL = 'ai-review';
+      jest.resetModules();
+      currentAppModuleForLabelTest = require('../index.js');
+      reviewCommandSpy = jest.spyOn(currentAppModuleForLabelTest, 'processReviewCommand').mockResolvedValue(undefined);
+      whatCommandSpy = jest.spyOn(currentAppModuleForLabelTest, 'processWhatCommand').mockResolvedValue('mock summary');
+    });
+
+    afterEach(() => {
+      delete process.env.ENABLE_LABEL_EVENT;
+      delete process.env.REVIEW_TRIGGER_LABEL;
+    });
+
+    it('triggers review when the configured label is added', async () => {
+      const labelPayload = {
+        action: 'labeled',
+        label: { name: 'ai-review' },
+        pull_request: { number: 1, head: { sha: 'a' }, base: { sha: 'b' }, body: 'PR body text' },
+        repository: { name: mockRepo, owner: { login: mockOwner } },
+        installation: { id: 2 }
+      };
+
+      const prNock = nock('https://api.github.com')
+        .get('/repos/' + mockOwner + '/' + mockRepo + '/pulls/1')
+        .reply(200, { ...mockPr });
+
+      const filesPayload = [
+        { filename: 'file.js', status: 'modified', changes: 1, additions: 1, deletions: 0, patch: '...' }
+      ];
+      const filesNock = nock('https://api.github.com')
+        .get('/repos/' + mockOwner + '/' + mockRepo + '/pulls/1/files')
+        .reply(200, filesPayload);
+
+      const initialCommentNock = nock('https://api.github.com')
+        .post('/repos/' + mockOwner + '/' + mockRepo + '/issues/1/comments')
+        .reply(200, { id: 12345 });
+
+      const tokenNock = nock('https://api.github.com')
+        .post('/app/installations/2/access_tokens')
+        .reply(200, { token: 'test-token' });
+
+      await currentAppModuleForLabelTest.app.receive({ name: 'pull_request', id: 'test-event-id', payload: labelPayload });
+
+      expect(tokenNock.isDone()).toBe(true);
+      expect(prNock.isDone()).toBe(true);
+      expect(filesNock.isDone()).toBe(true);
+      expect(initialCommentNock.isDone()).toBe(true);
+
+      expect(whatCommandSpy).toHaveBeenCalledTimes(1);
+      expect(reviewCommandSpy).toHaveBeenCalledTimes(1);
     });
   });
 });

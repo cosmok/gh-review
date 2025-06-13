@@ -8,6 +8,7 @@ A GitHub App that uses Google's GenAI (Vertex AI) with Gemini to provide intelli
 - **Commands**:
   - `/review`: Generates a PR summary and performs a deep code review
   - `/what`: (optional) Only produce the summary of changes
+- **Configurable Triggers**: Enable reactions to custom comment keywords or pull request labels
 - **Intelligent Analysis**:
   - Identifies bugs and logical errors
   - Detects potential security vulnerabilities
@@ -48,6 +49,12 @@ A GitHub App that uses Google's GenAI (Vertex AI) with Gemini to provide intelli
      - `MAX_FILES_TO_PROCESS` (default 20)
      - `MAX_DIFF_LENGTH`, `MAX_DIFF_LINES`, `MAX_FILE_SIZE`, and
        `MAX_CONTEXT_LINES`
+   - (Optional) Control event triggers with:
+     - `ENABLE_ISSUE_COMMENT_EVENT` (`true` by default)
+     - `ENABLE_LABEL_EVENT` (`false` by default)
+     - `REVIEW_TRIGGER_LABEL` (label name to trigger review, default `ai-review`)
+     - `REVIEW_COMMENT_KEYWORD` (default `/review`)
+     - `SUMMARY_COMMENT_KEYWORD` (default `/what`)
 
 3. **Install Dependencies**
    ```bash
