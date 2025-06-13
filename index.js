@@ -32,6 +32,8 @@ const MAX_CONTEXT_LINES = parseInt(process.env.MAX_CONTEXT_LINES || '200', 10);
 const REQUEST_TIMEOUT = parseInt(process.env.REQUEST_TIMEOUT || '30000', 10);
 const CONCURRENCY_LIMIT = parseInt(process.env.CONCURRENCY_LIMIT || '3', 10);
 const MAX_FILES_TO_PROCESS = parseInt(process.env.MAX_FILES_TO_PROCESS || '20', 10);
+// Label that triggers an AI review when added to a PR
+const TRIGGER_LABEL = process.env.TRIGGER_LABEL || 'ai-review';
 
 // Verify required environment variables (This will run when module is loaded)
 const requiredVars = [
@@ -542,6 +544,61 @@ function registerEventHandlers(probot, options = {}) {
     });
   }
 
+  probot.on('pull_request.labeled', async (context) => {
+    const { pull_request: pr, repository, label } = context.payload;
+    if (!pr || label.name !== TRIGGER_LABEL) return;
+
+    const prNumber = pr.number;
+    const { name: repoName, owner } = repository;
+    const repoOwner = owner.login;
+
+    const octokitInstance = new Octokit({
+      auth: `token ${await context.octokit.apps.createInstallationAccessToken({
+        installation_id: context.payload.installation.id,
+        repository_ids: [repository.id]
+      }).then(({ data }) => data.token)}`
+    });
+
+    try {
+      const { data: prData } = await octokitInstance.pulls.get({ owner: repoOwner, repo: repoName, pull_number: prNumber });
+      const { data: files } = await octokitInstance.pulls.listFiles({ owner: repoOwner, repo: repoName, pull_number: prNumber });
+
+      const dependencies = {
+        processFileDiffDep: processFileDiff,
+        analyzeWithAIDep: analyzeWithAI
+      };
+
+      const summary = await module.exports.processWhatCommand(
+        octokitInstance,
+        repoOwner,
+        repoName,
+        prData,
+        files,
+        dependencies,
+        { returnSummary: true }
+      );
+      const { data: initialComment } = await octokitInstance.issues.createComment({
+        owner: repoOwner,
+        repo: repoName,
+        issue_number: prNumber,
+        body: '🔍 Starting AI code review... This may take a few minutes.'
+      });
+      octokitInstance.__initialReviewComment = initialComment;
+
+      await module.exports.processReviewCommand(
+        octokitInstance,
+        repoOwner,
+        repoName,
+        prData,
+        files,
+        dependencies,
+        summary
+      );
+    } catch (error) {
+      structuredLog('ERROR', 'Error processing PR label event', { error: error.message, stack: error.stack });
+    }
+  });
+
   probot.on('installation.created', async (context) => {
     const { repositories = [] } = context.payload;
     structuredLog('INFO', 'App installed', { repositories: repositories.length });
@@ -605,7 +662,8 @@ module.exports = {
     MAX_CONTEXT_LINES,
     REQUEST_TIMEOUT,
     CONCURRENCY_LIMIT,
-    MAX_FILES_TO_PROCESS
+    MAX_FILES_TO_PROCESS,
+    TRIGGER_LABEL
   }
 };
 
