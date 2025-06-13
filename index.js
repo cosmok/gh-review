@@ -174,7 +174,7 @@ async function getFileContent(octokit, owner, repo, path, ref, options = {}) {
     if (error.status === 404) {
       structuredLog('INFO', 'File not found', { path, ref });
     } else {
-      structuredLog('ERROR', 'Error getting file content', { path, error: error.message, statck: error.stack });
+      structuredLog('ERROR', 'Error getting file content', { path, error: error.message, stack: error.stack });
     }
     return error.status === 404 ? '[File not found or deleted]' : `[Error retrieving file: ${error.message}]`;
   }
