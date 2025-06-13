@@ -8,6 +8,7 @@ A GitHub App that uses Google's GenAI (Vertex AI) with Gemini to provide intelli
 - **Commands**:
   - `/review`: Generates a PR summary and performs a deep code review
   - `/what`: (optional) Only produce the summary of changes
+  - Add the `ai-review` label to a PR to trigger an automatic review
 - **Intelligent Analysis**:
   - Identifies bugs and logical errors
   - Detects potential security vulnerabilities
@@ -48,6 +49,7 @@ A GitHub App that uses Google's GenAI (Vertex AI) with Gemini to provide intelli
      - `MAX_FILES_TO_PROCESS` (default 20)
      - `MAX_DIFF_LENGTH`, `MAX_DIFF_LINES`, `MAX_FILE_SIZE`, and
        `MAX_CONTEXT_LINES`
+   - (Optional) `TRIGGER_LABEL` overrides the label name used to start a review (default `ai-review`)
 
 3. **Install Dependencies**
    ```bash

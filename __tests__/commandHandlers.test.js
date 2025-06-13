@@ -20,6 +20,14 @@ const issueCommentPayload = {
   installation: { id: 2 },
 };
 
+const prLabeledPayload = {
+  action: 'labeled',
+  pull_request: { number: 1 },
+  repository: { name: 'test-repo', owner: { login: 'test-owner' }, full_name: 'test-owner/test-repo' },
+  installation: { id: 2 },
+  label: { name: 'ai-review' },
+};
+
 describe('Command Handlers', () => {
   let mockOctokit;
 
@@ -251,6 +259,55 @@ describe('Command Handlers', () => {
         },
         expect.any(String)
       );
+    });
+  });
+
+  describe('Pull Request Label Event via Probot', () => {
+    let currentApp;
+    let reviewSpy;
+    let whatSpy;
+
+    beforeEach(() => {
+      jest.resetModules();
+      currentApp = require('../index.js');
+      reviewSpy = jest.spyOn(currentApp, 'processReviewCommand').mockResolvedValue(undefined);
+      whatSpy = jest.spyOn(currentApp, 'processWhatCommand').mockResolvedValue('mock summary');
+    });
+
+    it('triggers review when label matches', async () => {
+      const eventPayload = JSON.parse(JSON.stringify(prLabeledPayload));
+      eventPayload.pull_request.number = mockPr.number;
+      eventPayload.repository.owner.login = mockOwner;
+      eventPayload.repository.name = mockRepo;
+      eventPayload.installation = { id: 2 };
+
+      const tokenNock = nock('https://api.github.com')
+        .post('/app/installations/2/access_tokens')
+        .reply(200, { token: 'test-token' });
+
+      const prNock = nock('https://api.github.com')
+        .get('/repos/' + mockOwner + '/' + mockRepo + '/pulls/' + mockPr.number)
+        .reply(200, { ...mockPr, number: mockPr.number, head: { sha: 'a' }, base: { sha: 'b' }, body: 'PR body text' });
+
+      const filesPayload = [
+        { filename: 'file.js', status: 'modified', changes: 1, additions: 1, deletions: 0, patch: '...' }
+      ];
+      const filesNock = nock('https://api.github.com')
+        .get('/repos/' + mockOwner + '/' + mockRepo + '/pulls/' + mockPr.number + '/files')
+        .reply(200, filesPayload);
+
+      const initialCommentNock = nock('https://api.github.com')
+        .post('/repos/' + mockOwner + '/' + mockRepo + '/issues/' + mockPr.number + '/comments')
+        .reply(200, { id: 12345 });
+
+      await currentApp.app.receive({ name: 'pull_request', id: 'test-event-id', payload: eventPayload });
+
+      expect(tokenNock.isDone()).toBe(true);
+      expect(prNock.isDone()).toBe(true);
+      expect(filesNock.isDone()).toBe(true);
+      expect(initialCommentNock.isDone()).toBe(true);
+      expect(whatSpy).toHaveBeenCalledTimes(1);
+      expect(reviewSpy).toHaveBeenCalledTimes(1);
     });
   });
 });
