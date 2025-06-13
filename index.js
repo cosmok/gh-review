@@ -7,7 +7,23 @@ const pLimit = require("p-limit").default || require("p-limit");
 
 // Configuration constants
 function structuredLog(severity, message, fields = {}) {
-  console.log(JSON.stringify({ severity, message, ...fields }));
+  const logData = JSON.stringify({ severity, message, ...fields, timestamp: new Date().toISOString() });
+  switch (severity.toLowerCase()) {
+    case 'error':
+      console.error(logData);
+      break;
+    case 'warn':
+      console.warn(logData);
+      break;
+    case 'info':
+      console.info(logData);
+      break;
+    case 'debug':
+      console.debug(logData);
+      break;
+    default:
+      console.log(logData); // Fallback for unknown or default severity
+  }
 }
 const MAX_FILE_SIZE = parseInt(process.env.MAX_FILE_SIZE || '100000', 10);
 const MAX_DIFF_LENGTH = parseInt(process.env.MAX_DIFF_LENGTH || '8000', 10);
@@ -46,7 +62,7 @@ try {
     location: process.env.GOOGLE_CLOUD_LOCATION,
   });
 } catch (e) {
-  structuredLog('ERROR', 'Failed to initialize GoogleGenAI', { error: e.message });
+  structuredLog('ERROR', 'Failed to initialize GoogleGenAI', { error: e.message, stack: e.stack });
   // Decide if process should exit or if this is recoverable/testable
 }
 
@@ -89,6 +105,7 @@ async function analyzeWithAI(prompt, codeSnippet, filePath, context = '') {
       filePath,
       error: message,
       preview: preview || undefined,
+      stack: error.stack || undefined,
     });
     return null;
   }
@@ -157,7 +174,7 @@ async function getFileContent(octokit, owner, repo, path, ref, options = {}) {
     if (error.status === 404) {
       structuredLog('INFO', 'File not found', { path, ref });
     } else {
-      structuredLog('ERROR', 'Error getting file content', { path, error: error.message });
+      structuredLog('ERROR', 'Error getting file content', { path, error: error.message, stack: error.stack });
     }
     return error.status === 404 ? '[File not found or deleted]' : `[Error retrieving file: ${error.message}]`;
   }
@@ -221,7 +238,7 @@ async function processFileDiff(octokit, owner, repo, file, pr) {
     fileInfo.processingTime = Date.now() - startTime;
     return fileInfo;
   } catch (error) {
-    structuredLog('ERROR', 'Error processing file diff', { file: file.filename, error: error.message });
+    structuredLog('ERROR', 'Error processing file diff', { file: file.filename, error: error.message, stack: error.stack });
     fileInfo.error = `Processing error: ${error.message}`;
     fileInfo.processingTime = Date.now() - startTime;
     return fileInfo;
@@ -237,7 +254,7 @@ async function processWhatCommand(octokit, owner, repo, pr, files, dependencies 
   const { returnSummary = false } = options;
   try {
     const { data } = await octokit.pulls.get({ owner, repo, pull_number: pr.number, mediaType: { format: 'diff' } })
-      .catch(error => { structuredLog('ERROR', 'Error getting PR diff', { error: error.message }); throw new Error('Failed to retrieve PR diff.'); });
+      .catch(error => { structuredLog('ERROR', 'Error getting PR diff', { error: error.message, stack: error.stack }); throw new Error('Failed to retrieve PR diff.'); });
     const diff = typeof data === 'string' ? data : data.diff;
     
     const prompt = `# PR Summary Request\n\n## PR Details\n- Title: ${pr.title}\n- Author: ${pr.user?.login || 'Unknown'}\n- Changed Files: ${files.length} files with ${files.reduce((a, f) => a + f.changes, 0)} changes\n\n## Instructions\nPlease provide a concise summary of the changes in this pull request.\nFocus on the main purpose and key changes. Be brief and to the point.\nHighlight any major architectural changes or potential impacts.`;
@@ -252,7 +269,7 @@ async function processWhatCommand(octokit, owner, repo, pr, files, dependencies 
       }
     }
   } catch (error) {
-    structuredLog('ERROR', 'Error in processWhatCommand', { error: error.message });
+    structuredLog('ERROR', 'Error in processWhatCommand', { error: error.message, stack: error.stack });
     await octokit.issues.createComment({ owner, repo, issue_number: pr.number, body: `❌ Error generating PR summary: ${error.message || 'Unknown error'}` });
   }
 }
@@ -303,7 +320,7 @@ async function processReviewCommand(octokit, owner, repo, pr, files, dependencie
                   side: 'RIGHT'
                 });
               } catch (e) {
-                structuredLog('ERROR', 'Failed to create inline comment', { file: file.filename, line, error: e.message });
+                structuredLog('ERROR', 'Failed to create inline comment', { file: file.filename, line, error: e.message, stack: e.stack });
               }
             }
           }
@@ -311,7 +328,7 @@ async function processReviewCommand(octokit, owner, repo, pr, files, dependencie
 
         return { filename: file.filename, status: analysis ? 'reviewed' : 'error', analysis, error: analysis ? null : 'Failed to analyze file' };
       } catch (error) {
-        structuredLog('ERROR', 'Error processing file', { file: file.filename, error: error.message });
+        structuredLog('ERROR', 'Error processing file', { file: file.filename, error: error.message, stack: error.stack });
         return { filename: file.filename, status: 'error', error: error.message };
       }
     };
@@ -333,7 +350,7 @@ async function processReviewCommand(octokit, owner, repo, pr, files, dependencie
     reviewBody += '---\n🔍 This is an automated review powered by Google GenAI.\n⚠️ This is a best-effort review and may not catch all issues.\n🔍 Always perform your own thorough review before merging.\n⏱️ Total processing time: ' + processingTime.toFixed(1) + 's';
     await octokit.issues.updateComment({ owner, repo, comment_id: reviewComment.id, body: reviewBody });
   } catch (error) {
-    structuredLog('ERROR', 'Error in processReviewCommand', { error: error.message });
+    structuredLog('ERROR', 'Error in processReviewCommand', { error: error.message, stack: error.stack });
     try {
       const errorMessage = error.message || 'Unknown error occurred';
       const errorBody = `## ❌ Error During Review\n\nAn error occurred while processing your review request:\n\n\`\`\`\n${errorMessage}\n\`\`\`\n\nPlease try again later or contact support if the issue persists.`;
@@ -402,7 +419,7 @@ function registerEventHandlers(probot) {
         );
       }
     } catch (error) {
-      structuredLog('ERROR', 'Error processing PR comment', { error: error.message });
+      structuredLog('ERROR', 'Error processing PR comment', { error: error.message, stack: error.stack });
       await octokitInstance.issues.createComment({ owner: repoOwner, repo: repoName, issue_number: prNumber, body: '❌ An error occurred while processing your request.' });
     }
   });
@@ -413,7 +430,7 @@ function registerEventHandlers(probot) {
   });
 
   probot.onError((error) => {
-    structuredLog('ERROR', 'App error', { error: error.message });
+    structuredLog('ERROR', 'App error', { error: error.message, stack: error.stack });
   });
 }
 
@@ -443,7 +460,7 @@ structuredLog('INFO', 'Probot app initialized');
 if (require.main === module) {
   const { run } = require('probot');
   run(registerEventHandlers).catch(error => {
-    structuredLog('ERROR', 'Failed to start Probot app', { error: error.message });
+    structuredLog('ERROR', 'Failed to start Probot app', { error: error.message, stack: error.stack });
     process.exit(1);
   });
 }
