@@ -204,49 +204,67 @@ function getChangedLineNumbers(diff) {
 function expandLineNumbersToBlock(content, lineNumbers) {
   if (!content || !lineNumbers || lineNumbers.length === 0) return lineNumbers;
   const lines = content.split('\n');
-  let startIdx = Math.min(...lineNumbers) - 1;
-  let endIdx = Math.max(...lineNumbers) - 1;
+  const sorted = Array.from(new Set(lineNumbers)).sort((a, b) => a - b);
 
-  const hasBraces = content.includes('{') && content.includes('}');
+  function expandRange(startIdx, endIdx) {
+    const hasBraces = content.includes('{') && content.includes('}');
+    if (hasBraces) {
+      let depth = 0;
+      for (let i = startIdx; i >= 0; i--) {
+        depth += (lines[i].match(/}/g) || []).length;
+        depth -= (lines[i].match(/{/g) || []).length;
+        if (depth < 0 || /\b(switch|function|def|class|if|for|while)\b/.test(lines[i])) {
+          startIdx = i;
+          break;
+        }
+      }
 
-  if (hasBraces) {
-    let depth = 0;
-    for (let i = startIdx; i >= 0; i--) {
-      depth += (lines[i].match(/}/g) || []).length;
-      depth -= (lines[i].match(/{/g) || []).length;
-      if (depth < 0 || /\b(switch|function|def|class|if|for|while)\b/.test(lines[i])) {
-        startIdx = i;
-        break;
+      depth = 0;
+      for (let i = endIdx; i < lines.length; i++) {
+        depth += (lines[i].match(/{/g) || []).length;
+        depth -= (lines[i].match(/}/g) || []).length;
+        if (depth < 0) {
+          endIdx = i;
+          break;
+        }
+      }
+    } else {
+      const indentMatch = lines[startIdx].match(/^\s*/);
+      const baseIndent = indentMatch ? indentMatch[0].length : 0;
+      for (let i = startIdx - 1; i >= 0; i--) {
+        if (lines[i].trim() === '') continue;
+        const currentIndent = lines[i].match(/^\s*/)[0].length;
+        if (currentIndent < baseIndent) { startIdx = i + 1; break; }
+      }
+      for (let i = endIdx + 1; i < lines.length; i++) {
+        if (lines[i].trim() === '') continue;
+        const currentIndent = lines[i].match(/^\s*/)[0].length;
+        if (currentIndent < baseIndent) { endIdx = i - 1; break; }
       }
     }
-
-    depth = 0;
-    for (let i = endIdx; i < lines.length; i++) {
-      depth += (lines[i].match(/{/g) || []).length;
-      depth -= (lines[i].match(/}/g) || []).length;
-      if (depth < 0) {
-        endIdx = i;
-        break;
-      }
-    }
-  } else {
-    const indentMatch = lines[startIdx].match(/^\s*/);
-    const baseIndent = indentMatch ? indentMatch[0].length : 0;
-    for (let i = startIdx - 1; i >= 0; i--) {
-      if (lines[i].trim() === '') continue;
-      const currentIndent = lines[i].match(/^\s*/)[0].length;
-      if (currentIndent < baseIndent) { startIdx = i + 1; break; }
-    }
-    for (let i = endIdx + 1; i < lines.length; i++) {
-      if (lines[i].trim() === '') continue;
-      const currentIndent = lines[i].match(/^\s*/)[0].length;
-      if (currentIndent < baseIndent) { endIdx = i - 1; break; }
-    }
+    return [startIdx, endIdx];
   }
 
-  const expanded = [];
-  for (let i = startIdx; i <= endIdx; i++) expanded.push(i + 1);
-  return expanded;
+  const ranges = [];
+  let rangeStart = sorted[0];
+  let prev = sorted[0];
+  for (let i = 1; i < sorted.length; i++) {
+    if (sorted[i] === prev + 1) {
+      prev = sorted[i];
+    } else {
+      ranges.push([rangeStart - 1, prev - 1]);
+      rangeStart = prev = sorted[i];
+    }
+  }
+  ranges.push([rangeStart - 1, prev - 1]);
+
+  const expandedSet = new Set();
+  for (const [s, e] of ranges) {
+    const [startIdx, endIdx] = expandRange(s, e);
+    for (let i = startIdx; i <= endIdx; i++) expandedSet.add(i + 1);
+  }
+
+  return Array.from(expandedSet).sort((a, b) => a - b);
 }
 
 async function processFileDiff(octokit, owner, repo, file, pr) {
