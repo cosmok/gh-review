@@ -152,4 +152,32 @@ function test() {
     expect(result.filename).toBe(mockFile.filename);
     expect(result.error).toBe('Binary file - skipped');
   });
+  it('should include full switch block context', async () => {
+    const mockFile = {
+      filename: 'log.js',
+      status: 'modified',
+      changes: 3,
+      additions: 2,
+      deletions: 1,
+      patch: `@@ -2,7 +2,7 @@\n switch (severity.toLowerCase()) {\n-  case 'error':\n+  case 'fatal':\n     console.error(logData);\n     break;`
+    };
+
+    const baseContent = `switch (severity.toLowerCase()) {\n  case 'error':\n    console.error(logData);\n    break;\n  case 'warn':\n    console.warn(logData);\n    break;\n  default:\n    console.log(logData);\n}`;
+
+    const headContent = baseContent.replace("'error'", "'fatal'");
+
+    nock('https://api.github.com')
+      .get(`/repos/${mockOwner}/${mockRepo}/contents/${encodeURIComponent(mockFile.filename)}`)
+      .query(q => q.ref === 'base-sha')
+      .reply(200, { content: Buffer.from(baseContent).toString('base64'), size: baseContent.length });
+
+    nock('https://api.github.com')
+      .get(`/repos/${mockOwner}/${mockRepo}/contents/${encodeURIComponent(mockFile.filename)}`)
+      .query(q => q.ref === 'head-sha')
+      .reply(200, { content: Buffer.from(headContent).toString('base64'), size: headContent.length });
+
+    const result = await processFileDiff(octokit, mockOwner, mockRepo, mockFile, mockPr);
+
+    expect(result.context).toContain('default');
+  });
 });
