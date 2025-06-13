@@ -197,6 +197,58 @@ function getChangedLineNumbers(diff) {
   return lineNumbers;
 }
 
+// Expand a list of changed line numbers to include the full surrounding code
+// block. This attempts to capture logical units like functions or switch
+// statements so the AI sees the entire context. The heuristics support
+// both brace-based languages and indentation-based languages like Python.
+function expandLineNumbersToBlock(content, lineNumbers) {
+  if (!content || !lineNumbers || lineNumbers.length === 0) return lineNumbers;
+  const lines = content.split('\n');
+  let startIdx = Math.min(...lineNumbers) - 1;
+  let endIdx = Math.max(...lineNumbers) - 1;
+
+  const hasBraces = content.includes('{') && content.includes('}');
+
+  if (hasBraces) {
+    let depth = 0;
+    for (let i = startIdx; i >= 0; i--) {
+      depth += (lines[i].match(/}/g) || []).length;
+      depth -= (lines[i].match(/{/g) || []).length;
+      if (depth < 0 || /\b(switch|function|def|class|if|for|while)\b/.test(lines[i])) {
+        startIdx = i;
+        break;
+      }
+    }
+
+    depth = 0;
+    for (let i = endIdx; i < lines.length; i++) {
+      depth += (lines[i].match(/{/g) || []).length;
+      depth -= (lines[i].match(/}/g) || []).length;
+      if (depth < 0) {
+        endIdx = i;
+        break;
+      }
+    }
+  } else {
+    const indentMatch = lines[startIdx].match(/^\s*/);
+    const baseIndent = indentMatch ? indentMatch[0].length : 0;
+    for (let i = startIdx - 1; i >= 0; i--) {
+      if (lines[i].trim() === '') continue;
+      const currentIndent = lines[i].match(/^\s*/)[0].length;
+      if (currentIndent < baseIndent) { startIdx = i + 1; break; }
+    }
+    for (let i = endIdx + 1; i < lines.length; i++) {
+      if (lines[i].trim() === '') continue;
+      const currentIndent = lines[i].match(/^\s*/)[0].length;
+      if (currentIndent < baseIndent) { endIdx = i - 1; break; }
+    }
+  }
+
+  const expanded = [];
+  for (let i = startIdx; i <= endIdx; i++) expanded.push(i + 1);
+  return expanded;
+}
+
 async function processFileDiff(octokit, owner, repo, file, pr) {
   const startTime = Date.now();
   const fileInfo = {
@@ -230,7 +282,8 @@ async function processFileDiff(octokit, owner, repo, file, pr) {
       const changedLines = getChangedLineNumbers(diff);
       const baseContent = await getFileContent(octokit, owner, repo, file.filename, pr.base.sha);
       const headContent = await getFileContent(octokit, owner, repo, file.filename, pr.head.sha);
-      fileInfo.context = `## Modified File: ${file.filename}\n\n### Changed lines with context (10 lines before/after):\n\n#### Base (${pr.base.sha.slice(0,7)}):\n\`\`\`\n${getSurroundingLines(baseContent, changedLines, 10)}\n\`\`\`\n\n#### Head (${pr.head.sha.slice(0,7)}):\n\`\`\`\n${getSurroundingLines(headContent, changedLines, 10)}\n\`\`\``;
+      const expandedLines = expandLineNumbersToBlock(headContent, changedLines);
+      fileInfo.context = `## Modified File: ${file.filename}\n\n### Changed lines with context (10 lines before/after):\n\n#### Base (${pr.base.sha.slice(0,7)}):\n\`\`\`\n${getSurroundingLines(baseContent, expandedLines, 10)}\n\`\`\`\n\n#### Head (${pr.head.sha.slice(0,7)}):\n\`\`\`\n${getSurroundingLines(headContent, expandedLines, 10)}\n\`\`\``;
       fileInfo.changedLines = changedLines;
       fileInfo.headContent = headContent;
     }
@@ -475,6 +528,7 @@ module.exports = {
   processReviewCommand,
   getFileContent,
   getChangedLineNumbers,
+  expandLineNumbersToBlock,
   getSurroundingLines,
   analyzeWithAI,
   truncateToLines,
