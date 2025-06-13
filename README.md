@@ -5,9 +5,9 @@ A GitHub App that uses Google's GenAI (Vertex AI) with Gemini to provide intelli
 ## Features
 
 - **AI-Powered Code Review**: Uses Google's GenAI with Gemini to analyze code
-- **Two Simple Commands**:
-  - `/what`: Provides a summary of changes in the PR
-  - `/review`: Performs a comprehensive code review
+- **Commands**:
+  - `/review`: Generates a PR summary and performs a deep code review
+  - `/what`: (optional) Only produce the summary of changes
 - **Intelligent Analysis**:
   - Identifies bugs and logical errors
   - Detects potential security vulnerabilities
@@ -39,6 +39,7 @@ A GitHub App that uses Google's GenAI (Vertex AI) with Gemini to provide intelli
    - Copy `.env.example` to `.env`
    - Fill in the values from your GitHub App settings
    - For the private key, copy the contents of the downloaded `.pem` file and format it as a single line with `\n` for newlines
+   - (Optional) Set `GENAI_MODEL` to override the default Gemini model
 
 3. **Install Dependencies**
    ```bash
