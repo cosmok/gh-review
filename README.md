@@ -34,10 +34,13 @@ A GitHub App that uses Google's GenAI (Vertex AI) with Gemini to provide intelli
      - Installation
    - Click "Create GitHub App"
    - Generate a private key and download it
+   - Deploy your `gh-review` service and update the GitHub App's webhook URL
+   - Use the generated webhook secret and credentials in your `.env` file
 
 2. **Configure Environment Variables**
    - Copy `.env.example` to `.env`
    - Fill in the values from your GitHub App settings
+   - Set `APP_ID`, `PRIVATE_KEY`, and `WEBHOOK_SECRET` with the credentials from the app you created
    - For the private key, copy the contents of the downloaded `.pem` file and format it as a single line with `\n` for newlines
    - (Optional) Set `GENAI_MODEL` to override the default Gemini model
    - (Optional) Set `PORT` for local testing (default `3000`)
@@ -74,7 +77,6 @@ You can deploy this app to any Node.js hosting platform like:
 - Vercel
 - AWS Lambda
 - Google Cloud Run
-- Google Cloud Functions
 
 ### Google Cloud Run
 
@@ -82,15 +84,6 @@ You can deploy this app to any Node.js hosting platform like:
 2. Ensure the container executes `npm start` (which runs `node index.js`).
 
 Make sure to set the environment variables in your hosting platform's configuration.
-
-### Google Cloud Functions
-
-1. Deploy using [`function.js`](function.js) as the entry point:
-   ```bash
-   gcloud functions deploy probotApp \
-     --runtime=nodejs18 --trigger-http --entry-point=probotApp
-   ```
-2. Set all required environment variables in the function configuration.
 
 
 ## License
