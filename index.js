@@ -197,6 +197,76 @@ function getChangedLineNumbers(diff) {
   return lineNumbers;
 }
 
+// Expand a list of changed line numbers to include the full surrounding code
+// block. This attempts to capture logical units like functions or switch
+// statements so the AI sees the entire context. The heuristics support
+// both brace-based languages and indentation-based languages like Python.
+function expandLineNumbersToBlock(content, lineNumbers) {
+  if (!content || !lineNumbers || lineNumbers.length === 0) return lineNumbers;
+  const lines = content.split('\n');
+  const sorted = Array.from(new Set(lineNumbers)).sort((a, b) => a - b);
+
+  function expandRange(startIdx, endIdx) {
+    const hasBraces = content.includes('{') && content.includes('}');
+    if (hasBraces) {
+      let depth = 0;
+      for (let i = startIdx; i >= 0; i--) {
+        depth += (lines[i].match(/}/g) || []).length;
+        depth -= (lines[i].match(/{/g) || []).length;
+        if (depth < 0 || /\b(switch|function|def|class|if|for|while)\b/.test(lines[i])) {
+          startIdx = i;
+          break;
+        }
+      }
+
+      depth = 0;
+      for (let i = endIdx; i < lines.length; i++) {
+        depth += (lines[i].match(/{/g) || []).length;
+        depth -= (lines[i].match(/}/g) || []).length;
+        if (depth < 0) {
+          endIdx = i;
+          break;
+        }
+      }
+    } else {
+      const indentMatch = lines[startIdx].match(/^\s*/);
+      const baseIndent = indentMatch ? indentMatch[0].length : 0;
+      for (let i = startIdx - 1; i >= 0; i--) {
+        if (lines[i].trim() === '') continue;
+        const currentIndent = lines[i].match(/^\s*/)[0].length;
+        if (currentIndent < baseIndent) { startIdx = i + 1; break; }
+      }
+      for (let i = endIdx + 1; i < lines.length; i++) {
+        if (lines[i].trim() === '') continue;
+        const currentIndent = lines[i].match(/^\s*/)[0].length;
+        if (currentIndent < baseIndent) { endIdx = i - 1; break; }
+      }
+    }
+    return [startIdx, endIdx];
+  }
+
+  const ranges = [];
+  let rangeStart = sorted[0];
+  let prev = sorted[0];
+  for (let i = 1; i < sorted.length; i++) {
+    if (sorted[i] === prev + 1) {
+      prev = sorted[i];
+    } else {
+      ranges.push([rangeStart - 1, prev - 1]);
+      rangeStart = prev = sorted[i];
+    }
+  }
+  ranges.push([rangeStart - 1, prev - 1]);
+
+  const expandedSet = new Set();
+  for (const [s, e] of ranges) {
+    const [startIdx, endIdx] = expandRange(s, e);
+    for (let i = startIdx; i <= endIdx; i++) expandedSet.add(i + 1);
+  }
+
+  return Array.from(expandedSet).sort((a, b) => a - b);
+}
+
 async function processFileDiff(octokit, owner, repo, file, pr) {
   const startTime = Date.now();
   const fileInfo = {
@@ -230,7 +300,8 @@ async function processFileDiff(octokit, owner, repo, file, pr) {
       const changedLines = getChangedLineNumbers(diff);
       const baseContent = await getFileContent(octokit, owner, repo, file.filename, pr.base.sha);
       const headContent = await getFileContent(octokit, owner, repo, file.filename, pr.head.sha);
-      fileInfo.context = `## Modified File: ${file.filename}\n\n### Changed lines with context (10 lines before/after):\n\n#### Base (${pr.base.sha.slice(0,7)}):\n\`\`\`\n${getSurroundingLines(baseContent, changedLines, 10)}\n\`\`\`\n\n#### Head (${pr.head.sha.slice(0,7)}):\n\`\`\`\n${getSurroundingLines(headContent, changedLines, 10)}\n\`\`\``;
+      const expandedLines = expandLineNumbersToBlock(headContent, changedLines);
+      fileInfo.context = `## Modified File: ${file.filename}\n\n### Changed lines with context (10 lines before/after):\n\n#### Base (${pr.base.sha.slice(0,7)}):\n\`\`\`\n${getSurroundingLines(baseContent, expandedLines, 10)}\n\`\`\`\n\n#### Head (${pr.head.sha.slice(0,7)}):\n\`\`\`\n${getSurroundingLines(headContent, expandedLines, 10)}\n\`\`\``;
       fileInfo.changedLines = changedLines;
       fileInfo.headContent = headContent;
     }
@@ -475,6 +546,7 @@ module.exports = {
   processReviewCommand,
   getFileContent,
   getChangedLineNumbers,
+  expandLineNumbersToBlock,
   getSurroundingLines,
   analyzeWithAI,
   truncateToLines,
