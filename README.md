@@ -40,6 +40,10 @@ A GitHub App that uses Google's GenAI (Vertex AI) with Gemini to provide intelli
    - Fill in the values from your GitHub App settings
    - For the private key, copy the contents of the downloaded `.pem` file and format it as a single line with `\n` for newlines
    - (Optional) Set `GENAI_MODEL` to override the default Gemini model
+   - (Optional) Tune limits with:
+     - `MAX_FILES_TO_PROCESS` (default 20)
+     - `MAX_DIFF_LENGTH`, `MAX_DIFF_LINES`, `MAX_FILE_SIZE`, and
+       `MAX_CONTEXT_LINES`
 
 3. **Install Dependencies**
    ```bash

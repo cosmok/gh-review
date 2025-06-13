@@ -197,7 +197,7 @@ describe('Command Handlers', () => {
       currentAppModuleForProbotTest = require('../index.js');
 
       reviewCommandSpy = jest.spyOn(currentAppModuleForProbotTest, 'processReviewCommand').mockResolvedValue(undefined);
-      whatCommandSpy = jest.spyOn(currentAppModuleForProbotTest, 'processWhatCommand').mockResolvedValue(undefined);
+      whatCommandSpy = jest.spyOn(currentAppModuleForProbotTest, 'processWhatCommand').mockResolvedValue('mock summary');
     });
 
     it('should trigger review for /review comment by calling the spied processReviewCommand', async () => {
@@ -248,7 +248,8 @@ describe('Command Handlers', () => {
         {
           processFileDiffDep: currentAppModuleForProbotTest.processFileDiff,
           analyzeWithAIDep: currentAppModuleForProbotTest.analyzeWithAI
-        }
+        },
+        expect.any(String)
       );
     });
   });
