@@ -486,13 +486,11 @@ async function processReviewCommand(octokit, owner, repo, pr, files, dependencie
     const processingTime = (Date.now() - startTime) / 1000;
 
     let reviewBody = '';
-    if (summary) reviewBody += `## 📝 PR Summary\n\n${removeLeadingMarkdownHeading(summary)}\n\n`;
-    reviewBody += `## 🗂️ Review Plan\n\n${removeLeadingMarkdownHeading(managerPlan)}\n\n`;
     reviewBody += `## 🔍 AI Code Review Summary\n\n${removeLeadingMarkdownHeading(finalSummary)}\n\n`;
 
     if (filesWithIssues.length > 0) {
       reviewBody += `## 🚨 Files with Potential Issues\n\n`;
-      for (const file of filesWithIssues) reviewBody += `### 📄 ${file.filename}\n${file.analysis}\n\n`;
+      for (const file of filesWithIssues) reviewBody += `### 📄 ${file.filename}\n`;
     } else if (successfulReviews.length > 0) reviewBody += '🎉 No potential issues found in the reviewed files!\n\n';
 
     if (errors.length > 0) reviewBody += `## ⚠️ Processing Errors\n\nThe following files could not be processed:\n${errors.map(e => `- ${e.filename}: ${e.error || 'Unknown error'}`).join('\n')}\n\n`;
