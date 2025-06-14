@@ -184,20 +184,33 @@ async function getFileContent(octokit, owner, repo, path, ref, options = {}) {
 }
 
 function getChangedLineNumbers(diff) {
-  if (!diff) return [];
-  const lineNumbers = [];
+  if (!diff) return { headLines: [], baseLines: [] };
+  const headLines = [];
+  const baseLines = [];
   const lines = diff.split('\n');
-  let currentLine = 0;
+  let currentHead = 0;
+  let currentBase = 0;
   for (const line of lines) {
     if (line.startsWith('@@')) {
-      const match = line.match(/\+([0-9]+),?([0-9]*)/);
-      if (match) currentLine = parseInt(match[1], 10) - 1;
+      const match = line.match(/-([0-9]+),?([0-9]*) \+([0-9]+),?([0-9]*)/);
+      if (match) {
+        currentBase = parseInt(match[1], 10) - 1;
+        currentHead = parseInt(match[3], 10) - 1;
+      }
       continue;
     }
-    if (line.startsWith('+') && !line.startsWith('+++')) lineNumbers.push(currentLine + 1);
-    if (!line.startsWith('-') || line.startsWith('---')) currentLine++;
+    if (line.startsWith('+') && !line.startsWith('+++')) {
+      headLines.push(currentHead + 1);
+      currentHead++;
+    } else if (line.startsWith('-') && !line.startsWith('---')) {
+      baseLines.push(currentBase + 1);
+      currentBase++;
+    } else {
+      currentHead++;
+      currentBase++;
+    }
   }
-  return lineNumbers;
+  return { headLines, baseLines };
 }
 
 // Expand a list of changed line numbers to include the full surrounding code
@@ -273,20 +286,23 @@ function expandLineNumbersToBlock(content, lineNumbers) {
 // Generate a unified diff limited to the changed region with 10 lines of context
 // around the modification. This helps provide full local context without the
 // noise of the entire file.
-function generateContextDiff(baseContent, headContent, lineNumbers, fileName) {
-  const baseLines = baseContent.split('\n');
-  const headLines = headContent.split('\n');
-  if (!lineNumbers || lineNumbers.length === 0) {
+function generateContextDiff(baseContent, headContent, baseLinesNums, headLinesNums, fileName) {
+  const baseLinesArr = baseContent.split('\n');
+  const headLinesArr = headContent.split('\n');
+  if ((!baseLinesNums || baseLinesNums.length === 0) && (!headLinesNums || headLinesNums.length === 0)) {
     return createTwoFilesPatch(fileName, fileName, baseContent, headContent, '', '', { context: 10 });
   }
 
-  const minLine = Math.max(1, Math.min(...lineNumbers));
-  const maxLine = Math.max(...lineNumbers);
-  const start = Math.max(0, minLine - 1 - 10);
-  const end = Math.min(Math.max(baseLines.length, headLines.length) - 1, maxLine - 1 + 10);
+  const minBase = baseLinesNums && baseLinesNums.length ? Math.max(1, Math.min(...baseLinesNums)) : baseLinesArr.length;
+  const maxBase = baseLinesNums && baseLinesNums.length ? Math.max(...baseLinesNums) : 1;
+  const minHead = headLinesNums && headLinesNums.length ? Math.max(1, Math.min(...headLinesNums)) : headLinesArr.length;
+  const maxHead = headLinesNums && headLinesNums.length ? Math.max(...headLinesNums) : 1;
 
-  const baseSnippet = baseLines.slice(start, end + 1).join('\n');
-  const headSnippet = headLines.slice(start, end + 1).join('\n');
+  const start = Math.max(0, Math.min(minBase, minHead) - 1 - 10);
+  const end = Math.min(Math.max(baseLinesArr.length, headLinesArr.length) - 1, Math.max(maxBase, maxHead) - 1 + 10);
+
+  const baseSnippet = baseLinesArr.slice(start, end + 1).join('\n');
+  const headSnippet = headLinesArr.slice(start, end + 1).join('\n');
 
   return createTwoFilesPatch(fileName, fileName, baseSnippet, headSnippet, '', '', { context: 10 });
 }
@@ -315,21 +331,22 @@ async function processFileDiff(octokit, owner, repo, file, pr) {
       fileInfo.diff = diff.length > MAX_DIFF_LENGTH ? diff.substring(0, MAX_DIFF_LENGTH) + '\n[...truncated...]' : diff;
       const content = await getFileContent(octokit, owner, repo, file.filename, pr.head.sha);
       fileInfo.context = `## New File: ${file.filename}\n\nFile content (truncated if large):\n\`\`\`\n${content}\n\`\`\``;
-      fileInfo.changedLines = getChangedLineNumbers(diff);
+      fileInfo.changedLines = getChangedLineNumbers(diff).headLines;
       fileInfo.headContent = content;
     } else if (file.status === 'removed') {
       fileInfo.diff = diff.length > MAX_DIFF_LENGTH ? diff.substring(0, MAX_DIFF_LENGTH) + '\n[...truncated...]' : diff;
       const content = await getFileContent(octokit, owner, repo, file.filename, pr.base.sha, { startLine: 1, endLine: 100, contextLines: 0 });
       fileInfo.context = `## Deleted File: ${file.filename}\n\nOriginal file content (first 100 lines):\n\`\`\`\n${content}\n\`\`\``;
     } else if (file.status === 'modified' || file.status === 'renamed') {
-      const changedLines = getChangedLineNumbers(diff);
+      const { headLines, baseLines } = getChangedLineNumbers(diff);
       const baseContent = await getFileContent(octokit, owner, repo, file.filename, pr.base.sha);
       const headContent = await getFileContent(octokit, owner, repo, file.filename, pr.head.sha);
-      const expandedLines = expandLineNumbersToBlock(headContent, changedLines);
-      fileInfo.context = `## Modified File: ${file.filename}\n\n### Changed lines with context (10 lines before/after):\n\n#### Base (${pr.base.sha.slice(0,7)}):\n\`\`\`\n${getSurroundingLines(baseContent, expandedLines, 10)}\n\`\`\`\n\n#### Head (${pr.head.sha.slice(0,7)}):\n\`\`\`\n${getSurroundingLines(headContent, expandedLines, 10)}\n\`\`\``;
-      fileInfo.changedLines = changedLines;
+      const expandedHead = expandLineNumbersToBlock(headContent, headLines);
+      const expandedBase = expandLineNumbersToBlock(baseContent, baseLines);
+      fileInfo.context = `## Modified File: ${file.filename}\n\n### Changed lines with context (10 lines before/after):\n\n#### Base (${pr.base.sha.slice(0,7)}):\n\`\`\`\n${getSurroundingLines(baseContent, expandedBase, 10)}\n\`\`\`\n\n#### Head (${pr.head.sha.slice(0,7)}):\n\`\`\`\n${getSurroundingLines(headContent, expandedHead, 10)}\n\`\`\``;
+      fileInfo.changedLines = headLines;
       fileInfo.headContent = headContent;
-      fileInfo.diff = generateContextDiff(baseContent, headContent, expandedLines, file.filename);
+      fileInfo.diff = generateContextDiff(baseContent, headContent, expandedBase, expandedHead, file.filename);
       if (fileInfo.diff.length > MAX_DIFF_LENGTH) {
         fileInfo.diff = fileInfo.diff.substring(0, MAX_DIFF_LENGTH) + '\n[...truncated...]';
       }

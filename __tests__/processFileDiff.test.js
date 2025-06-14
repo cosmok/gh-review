@@ -180,4 +180,43 @@ function test() {
 
     expect(result.context).toContain('default');
   });
+  it('handles moved blocks with correct diff context', async () => {
+    const mockFile = {
+      filename: 'move.js',
+      status: 'modified',
+      changes: 4,
+      additions: 2,
+      deletions: 2,
+      patch: `@@ -1,7 +1,7 @@\n-function foo() {\n-  console.log('foo');\n-}\n-\n function bar() {\n   console.log('bar');\n }\n+\n+function foo() {\n+  console.log('foo');\n+}`
+    };
+
+    const baseContent = `function foo() {\n  console.log('foo');\n}\n\nfunction bar() {\n  console.log('bar');\n}\n`;
+    const headContent = `function bar() {\n  console.log('bar');\n}\n\nfunction foo() {\n  console.log('foo');\n}\n`;
+
+    nock('https://api.github.com')
+      .get(`/repos/${mockOwner}/${mockRepo}/contents/${encodeURIComponent(mockFile.filename)}`)
+      .query(q => q.ref === 'base-sha')
+      .reply(200, { content: Buffer.from(baseContent).toString('base64'), size: baseContent.length });
+
+    nock('https://api.github.com')
+      .get(`/repos/${mockOwner}/${mockRepo}/contents/${encodeURIComponent(mockFile.filename)}`)
+      .query(q => q.ref === 'head-sha')
+      .reply(200, { content: Buffer.from(headContent).toString('base64'), size: headContent.length });
+
+    const result = await processFileDiff(octokit, mockOwner, mockRepo, mockFile, mockPr);
+    const expectedDiff = require('diff').createTwoFilesPatch(
+      mockFile.filename,
+      mockFile.filename,
+      baseContent,
+      headContent,
+      '',
+      '',
+      { context: 10 }
+    );
+
+    expect(result.diff.trim()).toBe(expectedDiff.trim());
+    expect(result.changedLines).toEqual([4,5,6,7]);
+    expect(result.context).toContain('Head');
+    expect(result.context).toContain('Base');
+  });
 });
