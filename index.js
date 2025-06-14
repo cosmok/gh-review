@@ -149,6 +149,21 @@ function getSurroundingLines(content, lineNumbers, contextLines = 10) {
   return result.join('\n');
 }
 
+async function mergeSimilarLineAnalyses(lineAnalyses, fileName, managerPlan, analyzeWithAIDep) {
+  if (!lineAnalyses || lineAnalyses.length === 0) return [];
+  if (lineAnalyses.length === 1) return lineAnalyses.map(l => ({ lines: [l.line], comment: l.comment }));
+  const prompt = `# Merge Line Comments\n\nGiven multiple line review comments for ${fileName}, merge comments that express similar feedback. Output ONLY a JSON array of objects with \"lines\" (array of line numbers) and \"comment\".`;
+  const input = lineAnalyses.map(l => `Line ${l.line}: ${l.comment}`).join('\n');
+  const response = await analyzeWithAIDep(prompt, input, fileName, managerPlan);
+  try {
+    const parsed = JSON.parse(response);
+    if (Array.isArray(parsed)) return parsed.map(p => ({ lines: p.lines || [], comment: p.comment || '' }));
+  } catch (e) {
+    structuredLog('ERROR', 'Failed to parse merged line comments', { file: fileName, error: e.message });
+  }
+  return lineAnalyses.map(l => ({ lines: [l.line], comment: l.comment }));
+}
+
 async function getFileContent(octokit, owner, repo, path, ref, options = {}) {
   const { startLine, endLine, contextLines } = options;
   try {
@@ -409,6 +424,7 @@ async function processReviewCommand(octokit, owner, repo, pr, files, dependencie
     initialComment
   } = dependencies;
   let reviewComment;
+  const postedLineAnalyses = new Set();
   try {
     if (initialComment || octokit.__initialReviewComment) {
       reviewComment = initialComment || octokit.__initialReviewComment;
@@ -439,45 +455,54 @@ async function processReviewCommand(octokit, owner, repo, pr, files, dependencie
       .map(f => `### ${f.info.filename}\n${f.info.diff}`)
       .join('\n');
 
-    const managerPrompt = `# Manager Planning\n\nCreate a short summary of this pull request and outline which sections of each file require careful review. Include the plan in a readable format.`;
+    const managerPrompt = `# Manager Summary\n\nSummarize the changes in this pull request and provide brief instructions for the reviewer. The manager does not need to perform a detailed review.`;
     const managerPlan = await analyzeWithAIDep(managerPrompt, combinedDiff, 'Manager Plan', commitMessages);
 
-    const results = await Promise.all(fileInfos.map(f => limit(async () => {
-      if (f.status !== 'ok') return { filename: f.filename, status: 'error', error: f.error };
-      const { info } = f;
-      const reviewerPrompt = `# Reviewer Task\n\nFollow the manager plan below to review ${info.filename}. Focus on the blocks highlighted.\n\n## Manager Plan\n${managerPlan}\n`;
-      const analysis = await analyzeWithAIDep(reviewerPrompt, info.diff, info.filename, info.context);
+      const results = await Promise.all(fileInfos.map(f => limit(async () => {
+        if (f.status !== 'ok') return { filename: f.filename, status: 'error', error: f.error };
+        const { info } = f;
+        const reviewerPrompt = `# Reviewer Task\n\nFollow the manager instructions below to review ${info.filename}. Focus on the blocks highlighted.\n\n## Manager Instructions\n${managerPlan}\n`;
+        const analysis = await analyzeWithAIDep(reviewerPrompt, info.diff, info.filename, info.context);
 
-      if (analysis && info.changedLines && info.changedLines.length > 0) {
-        const linesToComment = info.changedLines.slice(0, 3);
-        for (const line of linesToComment) {
-          const snippet = getSurroundingLines(info.headContent || '', [line], 3);
-          const inlinePrompt = `# Line Review\n\nUsing the manager plan below, provide feedback for the change around line ${line} in ${info.filename}.\n\n## Manager Plan\n${managerPlan}\n\n\`\`\`\n${snippet}\n\`\`\``;
-          const lineAnalysis = await analyzeWithAIDep(inlinePrompt, snippet, info.filename, info.context);
-          if (lineAnalysis) {
-            try {
-              await octokit.pulls.createReviewComment({
-                owner,
-                repo,
-                pull_number: pr.number,
-                commit_id: pr.head.sha,
-                path: info.filename,
-                body: lineAnalysis,
-                line,
-                side: 'RIGHT'
-              });
-            } catch (e) {
-              structuredLog('ERROR', 'Failed to create inline comment', { file: info.filename, line, error: e.message, stack: e.stack });
+        let lineAnalyses = [];
+        if (analysis && info.changedLines && info.changedLines.length > 0) {
+          const linesToComment = info.changedLines.slice(0, 3);
+          for (const line of linesToComment) {
+            const snippet = getSurroundingLines(info.headContent || '', [line], 3);
+            const inlinePrompt = `# Line Review\n\nUsing the manager instructions below, provide feedback for the change around line ${line} in ${info.filename}.\n\n## Manager Instructions\n${managerPlan}\n\n\`\`\`\n${snippet}\n\`\`\``;
+            const lineAnalysis = await analyzeWithAIDep(inlinePrompt, snippet, info.filename, info.context);
+            if (lineAnalysis) lineAnalyses.push({ line, comment: lineAnalysis.trim() });
+          }
+          if (lineAnalyses.length > 0) {
+            lineAnalyses = await mergeSimilarLineAnalyses(lineAnalyses, info.filename, managerPlan, analyzeWithAIDep);
+            for (const { lines, comment } of lineAnalyses) {
+              const key = comment.trim().toLowerCase();
+              if (!postedLineAnalyses.has(key)) {
+                postedLineAnalyses.add(key);
+                try {
+                  await octokit.pulls.createReviewComment({
+                    owner,
+                    repo,
+                    pull_number: pr.number,
+                    commit_id: pr.head.sha,
+                    path: info.filename,
+                    body: `${comment}\n\n_Lines: ${lines.join(', ')}_`,
+                    line: lines[0],
+                    side: 'RIGHT'
+                  });
+                } catch (e) {
+                  structuredLog('ERROR', 'Failed to create inline comment', { file: info.filename, line: lines[0], error: e.message, stack: e.stack });
+                }
+              }
             }
           }
         }
-      }
 
-      return { filename: info.filename, status: analysis ? 'reviewed' : 'error', analysis, error: analysis ? null : 'Failed to analyze file' };
-    })));
+        return { filename: info.filename, status: analysis ? 'reviewed' : 'error', analysis, error: analysis ? null : 'Failed to analyze file' };
+      })));
 
     const combinedReviews = results.filter(r => r.analysis).map(r => `### ${r.filename}\n${r.analysis}`).join('\n');
-    const finalPrompt = `# Final Manager Summary\n\nCombine and deduplicate the following file reviews.`;
+    const finalPrompt = `# Final Review\n\nCombine related comments from the reviewer, remove duplicates, and fix any issues in the feedback.`;
     const finalSummary = await analyzeWithAIDep(finalPrompt, combinedReviews, 'Manager Final', managerPlan);
 
     const successfulReviews = results.filter(r => r.status === 'reviewed' && r.analysis);
@@ -727,6 +752,7 @@ module.exports = {
   getChangedLineNumbers,
   expandLineNumbersToBlock,
   getSurroundingLines,
+  mergeSimilarLineAnalyses,
   analyzeWithAI,
   truncateToLines,
   removeLeadingMarkdownHeading,

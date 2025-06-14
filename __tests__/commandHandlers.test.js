@@ -81,7 +81,7 @@ describe('Command Handlers', () => {
       patch: 'mock patch data',
     });
 
-    it('should process /review command successfully, injecting dependencies', async () => {
+  it('should process /review command successfully, injecting dependencies', async () => {
       const filesPayload = [
         createMockFile('file1.js'),
         createMockFile('file2.txt'),
@@ -133,8 +133,44 @@ describe('Command Handlers', () => {
       if (processableFiles.length > 0) {
          expect(updatedCommentBody).toContain('Files with Potential Issues');
       } else {
-         expect(updatedCommentBody).toContain('No potential issues found');
+      expect(updatedCommentBody).toContain('No potential issues found');
       }
+    });
+
+    it('merges similar line comments using AI', async () => {
+      mockOctokit.pulls.createReviewComment = jest.fn().mockResolvedValue({});
+      const file = createMockFile('merge.js');
+      const filesPayload = [file];
+
+      const mockProcessFileDiffDep = jest.fn().mockResolvedValue({
+        filename: file.filename,
+        status: file.status,
+        diff: 'diff',
+        context: 'ctx',
+        changedLines: [3, 4],
+        headContent: 'code',
+        error: null,
+      });
+
+      const mockAnalyzeWithAIDep = jest.fn()
+        .mockResolvedValueOnce('manager plan')
+        .mockResolvedValueOnce('file analysis')
+        .mockResolvedValueOnce('[{"lines":[3,4],"comment":"combined"}]')
+        .mockResolvedValueOnce('final summary');
+
+      await processReviewCommand(
+        mockOctokit,
+        mockOwner,
+        mockRepo,
+        mockPr,
+        filesPayload,
+        { processFileDiffDep: mockProcessFileDiffDep, analyzeWithAIDep: mockAnalyzeWithAIDep }
+      );
+
+      expect(mockAnalyzeWithAIDep.mock.calls[4][0]).toMatch(/Merge Line Comments/);
+      expect(mockOctokit.pulls.createReviewComment).toHaveBeenCalledWith(
+        expect.objectContaining({ path: file.filename, line: 3, body: expect.stringContaining('combined') })
+      );
     });
   });
 
