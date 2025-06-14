@@ -183,6 +183,16 @@ async function getFileContent(octokit, owner, repo, path, ref, options = {}) {
   }
 }
 
+async function getCommitMessages(octokit, owner, repo, prNumber) {
+  try {
+    const { data } = await octokit.pulls.listCommits({ owner, repo, pull_number: prNumber });
+    return data.map(c => `- ${c.commit.message.split('\n')[0]}`).join('\n');
+  } catch (error) {
+    structuredLog('ERROR', 'Error getting commit messages', { error: error.message, stack: error.stack });
+    return '';
+  }
+}
+
 function getChangedLineNumbers(diff) {
   if (!diff) return { headLines: [], baseLines: [] };
   const headLines = [];
@@ -411,59 +421,82 @@ async function processReviewCommand(octokit, owner, repo, pr, files, dependencie
       if (file.status === 'removed') return false;
       return !file.filename.match(/\.(png|jpg|jpeg|gif|ico|svg|pdf|zip|tar\.gz|tgz|gz|7z|rar|exe|dll|so|a|o|pyc|pyo|pyd|class|jar|war|ear|bin|dat|db|sqlite|sqlite3)$/i);
     }).slice(0, MAX_FILES_TO_PROCESS);
-    const processFile = async (file) => {
-      try {
-        const fileDiff = await processFileDiffDep(octokit, owner, repo, file, pr);
-        if (!fileDiff || fileDiff.error) return { filename: file.filename, status: 'error', error: fileDiff?.error };
-        const prompt = `# Code Review Request\n\n## File: ${file.filename} (${file.status})\nChanges: ${file.changes} (${file.additions}+ ${file.deletions}-)\n\n## Review Guidelines\n1. Focus on the changes shown in the diff\n2. Check for bugs, security issues, and performance concerns\n3. Suggest improvements for code quality and best practices\n4. Only report issues you're certain about\n5. Reference specific line numbers from the diff\n\n## Context\n${fileDiff.context ? truncateToLines(fileDiff.context, 100) : 'No context available'}\n\n## Changes\n\`\`\`diff\n${fileDiff.diff}\n\`\`\``;
-        const analysis = await analyzeWithAIDep(prompt, fileDiff.diff, file.filename, fileDiff.context);
 
-        if (analysis && fileDiff.changedLines && fileDiff.changedLines.length > 0) {
-          const linesToComment = fileDiff.changedLines.slice(0, 3);
-          for (const line of linesToComment) {
-            const snippet = getSurroundingLines(fileDiff.headContent || '', [line], 3);
-            const inlinePrompt = `# Line Review\n\nProvide feedback for the following change in ${file.filename} around line ${line}:\n\n\`\`\`\n${snippet}\n\`\`\``;
-            const lineAnalysis = await analyzeWithAIDep(inlinePrompt, snippet, file.filename, fileDiff.context);
-            if (lineAnalysis) {
-              try {
-                await octokit.pulls.createReviewComment({
-                  owner,
-                  repo,
-                  pull_number: pr.number,
-                  commit_id: pr.head.sha,
-                  path: file.filename,
-                  body: lineAnalysis,
-                  line,
-                  side: 'RIGHT'
-                });
-              } catch (e) {
-                structuredLog('ERROR', 'Failed to create inline comment', { file: file.filename, line, error: e.message, stack: e.stack });
-              }
+    const commitMessages = await getCommitMessages(octokit, owner, repo, pr.number);
+
+    const fileInfos = [];
+    for (const file of filesToProcess) {
+      const info = await processFileDiffDep(octokit, owner, repo, file, pr);
+      if (!info || info.error) {
+        fileInfos.push({ filename: file.filename, status: 'error', error: info?.error });
+      } else {
+        fileInfos.push({ filename: file.filename, status: 'ok', info });
+      }
+    }
+
+    const combinedDiff = fileInfos
+      .filter(f => f.status === 'ok')
+      .map(f => `### ${f.info.filename}\n${f.info.diff}`)
+      .join('\n');
+
+    const managerPrompt = `# Manager Planning\n\nCreate a short summary of this pull request and outline which sections of each file require careful review. Include the plan in a readable format.`;
+    const managerPlan = await analyzeWithAIDep(managerPrompt, combinedDiff, 'Manager Plan', commitMessages);
+
+    const results = await Promise.all(fileInfos.map(f => limit(async () => {
+      if (f.status !== 'ok') return { filename: f.filename, status: 'error', error: f.error };
+      const { info } = f;
+      const reviewerPrompt = `# Reviewer Task\n\nFollow the manager plan below to review ${info.filename}. Focus on the blocks highlighted.\n\n## Manager Plan\n${managerPlan}\n`;
+      const analysis = await analyzeWithAIDep(reviewerPrompt, info.diff, info.filename, info.context);
+
+      if (analysis && info.changedLines && info.changedLines.length > 0) {
+        const linesToComment = info.changedLines.slice(0, 3);
+        for (const line of linesToComment) {
+          const snippet = getSurroundingLines(info.headContent || '', [line], 3);
+          const inlinePrompt = `# Line Review\n\nUsing the manager plan below, provide feedback for the change around line ${line} in ${info.filename}.\n\n## Manager Plan\n${managerPlan}\n\n\`\`\`\n${snippet}\n\`\`\``;
+          const lineAnalysis = await analyzeWithAIDep(inlinePrompt, snippet, info.filename, info.context);
+          if (lineAnalysis) {
+            try {
+              await octokit.pulls.createReviewComment({
+                owner,
+                repo,
+                pull_number: pr.number,
+                commit_id: pr.head.sha,
+                path: info.filename,
+                body: lineAnalysis,
+                line,
+                side: 'RIGHT'
+              });
+            } catch (e) {
+              structuredLog('ERROR', 'Failed to create inline comment', { file: info.filename, line, error: e.message, stack: e.stack });
             }
           }
         }
-
-        return { filename: file.filename, status: analysis ? 'reviewed' : 'error', analysis, error: analysis ? null : 'Failed to analyze file' };
-      } catch (error) {
-        structuredLog('ERROR', 'Error processing file', { file: file.filename, error: error.message, stack: error.stack });
-        return { filename: file.filename, status: 'error', error: error.message };
       }
-    };
-    const results = await Promise.all(filesToProcess.map(file => limit(() => processFile(file))));
+
+      return { filename: info.filename, status: analysis ? 'reviewed' : 'error', analysis, error: analysis ? null : 'Failed to analyze file' };
+    })));
+
+    const combinedReviews = results.filter(r => r.analysis).map(r => `### ${r.filename}\n${r.analysis}`).join('\n');
+    const finalPrompt = `# Final Manager Summary\n\nCombine and deduplicate the following file reviews.`;
+    const finalSummary = await analyzeWithAIDep(finalPrompt, combinedReviews, 'Manager Final', managerPlan);
+
     const successfulReviews = results.filter(r => r.status === 'reviewed' && r.analysis);
-    const filesWithIssues = successfulReviews.filter(r => !r.analysis.toLowerCase().includes('no issues found'));
+    const filesWithIssues = successfulReviews.filter(r => !r.analysis.toLowerCase().includes('no issues'));
     const errors = results.filter(r => r.status === 'error');
     const processingTime = (Date.now() - startTime) / 1000;
+
     let reviewBody = '';
-    if (summary) {
-      reviewBody += `## 📝 PR Summary\n\n${removeLeadingMarkdownHeading(summary)}\n\n`;
-    }
-    reviewBody += `## 🔍 AI Code Review Summary\n\n✅ Processed ${successfulReviews.length} files in ${processingTime.toFixed(1)}s\n⚠️  Found potential issues in ${filesWithIssues.length} files\n❌ ${errors.length} files had errors\n\n`;
+    if (summary) reviewBody += `## 📝 PR Summary\n\n${removeLeadingMarkdownHeading(summary)}\n\n`;
+    reviewBody += `## 🗂️ Review Plan\n\n${removeLeadingMarkdownHeading(managerPlan)}\n\n`;
+    reviewBody += `## 🔍 AI Code Review Summary\n\n${removeLeadingMarkdownHeading(finalSummary)}\n\n`;
+
     if (filesWithIssues.length > 0) {
       reviewBody += `## 🚨 Files with Potential Issues\n\n`;
       for (const file of filesWithIssues) reviewBody += `### 📄 ${file.filename}\n${file.analysis}\n\n`;
     } else if (successfulReviews.length > 0) reviewBody += '🎉 No potential issues found in the reviewed files!\n\n';
+
     if (errors.length > 0) reviewBody += `## ⚠️ Processing Errors\n\nThe following files could not be processed:\n${errors.map(e => `- ${e.filename}: ${e.error || 'Unknown error'}`).join('\n')}\n\n`;
+
     reviewBody += '---\n🔍 This is an automated review powered by Google GenAI.\n⚠️ This is a best-effort review and may not catch all issues.\n🔍 Always perform your own thorough review before merging.\n⏱️ Total processing time: ' + processingTime.toFixed(1) + 's';
     await octokit.issues.updateComment({ owner, repo, comment_id: reviewComment.id, body: reviewBody });
   } catch (error) {

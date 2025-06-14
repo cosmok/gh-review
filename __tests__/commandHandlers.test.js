@@ -55,6 +55,7 @@ describe('Command Handlers', () => {
           headers: { 'content-type': 'application/vnd.github.v3.diff' }
         }),
         listFiles: jest.fn().mockResolvedValue({ data: [] }),
+        listCommits: jest.fn().mockResolvedValue({ data: [ { commit: { message: 'test commit' } } ] }),
       },
       repos: {
         getContent: jest.fn().mockResolvedValue({
@@ -117,7 +118,7 @@ describe('Command Handlers', () => {
       });
 
       expect(mockProcessFileDiffDep).toHaveBeenCalledTimes(processableFiles.length);
-      expect(mockAnalyzeWithAIDep).toHaveBeenCalledTimes(processableFiles.length);
+      expect(mockAnalyzeWithAIDep).toHaveBeenCalledTimes(processableFiles.length + 2);
 
       for (const file of processableFiles) {
         expect(mockProcessFileDiffDep).toHaveBeenCalledWith(mockOctokit, mockOwner, mockRepo, file, mockPr);
