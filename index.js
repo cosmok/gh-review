@@ -4,6 +4,7 @@ const { Probot } = require('probot');
 const { Octokit } = require('@octokit/rest');
 const { GoogleGenAI } = require('@google/genai');
 const pLimit = require("p-limit").default || require("p-limit");
+const { createTwoFilesPatch } = require('diff');
 
 // Configuration constants
 function structuredLog(severity, message, fields = {}) {
@@ -269,6 +270,27 @@ function expandLineNumbersToBlock(content, lineNumbers) {
   return Array.from(expandedSet).sort((a, b) => a - b);
 }
 
+// Generate a unified diff limited to the changed region with 10 lines of context
+// around the modification. This helps provide full local context without the
+// noise of the entire file.
+function generateContextDiff(baseContent, headContent, lineNumbers, fileName) {
+  const baseLines = baseContent.split('\n');
+  const headLines = headContent.split('\n');
+  if (!lineNumbers || lineNumbers.length === 0) {
+    return createTwoFilesPatch(fileName, fileName, baseContent, headContent, '', '', { context: 10 });
+  }
+
+  const minLine = Math.max(1, Math.min(...lineNumbers));
+  const maxLine = Math.max(...lineNumbers);
+  const start = Math.max(0, minLine - 1 - 10);
+  const end = Math.min(Math.max(baseLines.length, headLines.length) - 1, maxLine - 1 + 10);
+
+  const baseSnippet = baseLines.slice(start, end + 1).join('\n');
+  const headSnippet = headLines.slice(start, end + 1).join('\n');
+
+  return createTwoFilesPatch(fileName, fileName, baseSnippet, headSnippet, '', '', { context: 10 });
+}
+
 async function processFileDiff(octokit, owner, repo, file, pr) {
   const startTime = Date.now();
   const fileInfo = {
@@ -289,13 +311,14 @@ async function processFileDiff(octokit, owner, repo, file, pr) {
       fileInfo.error = 'Binary file - skipped'; return fileInfo;
     }
     const diff = file.patch ? file.patch : '';
-    fileInfo.diff = diff.length > MAX_DIFF_LENGTH ? diff.substring(0, MAX_DIFF_LENGTH) + '\n[...truncated...]' : diff;
     if (file.status === 'added') {
+      fileInfo.diff = diff.length > MAX_DIFF_LENGTH ? diff.substring(0, MAX_DIFF_LENGTH) + '\n[...truncated...]' : diff;
       const content = await getFileContent(octokit, owner, repo, file.filename, pr.head.sha);
       fileInfo.context = `## New File: ${file.filename}\n\nFile content (truncated if large):\n\`\`\`\n${content}\n\`\`\``;
       fileInfo.changedLines = getChangedLineNumbers(diff);
       fileInfo.headContent = content;
     } else if (file.status === 'removed') {
+      fileInfo.diff = diff.length > MAX_DIFF_LENGTH ? diff.substring(0, MAX_DIFF_LENGTH) + '\n[...truncated...]' : diff;
       const content = await getFileContent(octokit, owner, repo, file.filename, pr.base.sha, { startLine: 1, endLine: 100, contextLines: 0 });
       fileInfo.context = `## Deleted File: ${file.filename}\n\nOriginal file content (first 100 lines):\n\`\`\`\n${content}\n\`\`\``;
     } else if (file.status === 'modified' || file.status === 'renamed') {
@@ -306,6 +329,10 @@ async function processFileDiff(octokit, owner, repo, file, pr) {
       fileInfo.context = `## Modified File: ${file.filename}\n\n### Changed lines with context (10 lines before/after):\n\n#### Base (${pr.base.sha.slice(0,7)}):\n\`\`\`\n${getSurroundingLines(baseContent, expandedLines, 10)}\n\`\`\`\n\n#### Head (${pr.head.sha.slice(0,7)}):\n\`\`\`\n${getSurroundingLines(headContent, expandedLines, 10)}\n\`\`\``;
       fileInfo.changedLines = changedLines;
       fileInfo.headContent = headContent;
+      fileInfo.diff = generateContextDiff(baseContent, headContent, expandedLines, file.filename);
+      if (fileInfo.diff.length > MAX_DIFF_LENGTH) {
+        fileInfo.diff = fileInfo.diff.substring(0, MAX_DIFF_LENGTH) + '\n[...truncated...]';
+      }
     }
     if (pr.body) fileInfo.context += `\n\n### PR Description/Context:\n> ${pr.body.replace(/\n/g, '\n> ')}`;
     fileInfo.processingTime = Date.now() - startTime;
