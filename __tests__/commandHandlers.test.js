@@ -172,6 +172,40 @@ describe('Command Handlers', () => {
         expect.objectContaining({ path: file.filename, line: 3, body: expect.stringContaining('combined') })
       );
     });
+
+    it('skips inline comments when no suggestions are returned', async () => {
+      mockOctokit.pulls.createReviewComment = jest.fn().mockResolvedValue({});
+      const file = createMockFile('clean.js');
+      const filesPayload = [file];
+
+      const mockProcessFileDiffDep = jest.fn().mockResolvedValue({
+        filename: file.filename,
+        status: file.status,
+        diff: 'diff',
+        context: 'ctx',
+        changedLines: [1, 2],
+        headContent: 'code',
+        error: null,
+      });
+
+      const mockAnalyzeWithAIDep = jest.fn().mockImplementation((prompt) => {
+        if (/Merge Line Comments/.test(prompt)) {
+          return Promise.resolve('[{"lines":[1,2],"comment":"No issues found"}]');
+        }
+        return Promise.resolve('analysis');
+      });
+
+      await processReviewCommand(
+        mockOctokit,
+        mockOwner,
+        mockRepo,
+        mockPr,
+        filesPayload,
+        { processFileDiffDep: mockProcessFileDiffDep, analyzeWithAIDep: mockAnalyzeWithAIDep }
+      );
+
+      expect(mockOctokit.pulls.createReviewComment).not.toHaveBeenCalled();
+    });
   });
 
   describe('/what command (direct call)', () => {
