@@ -149,6 +149,26 @@ function getSurroundingLines(content, lineNumbers, contextLines = 10) {
   return result.join('\n');
 }
 
+// Determine if an inline comment actually contains actionable feedback
+function shouldPostInlineComment(comment) {
+  if (!comment) return false;
+  const c = comment.toLowerCase();
+  const skipPhrases = [
+    'no issues',
+    'no issue',
+    'no suggestions',
+    'no suggestion',
+    'no improvements',
+    'looks good',
+    'lgtm',
+    'nothing to change',
+    'nothing to improve',
+    'no feedback',
+    'good job'
+  ];
+  return !skipPhrases.some(p => c.includes(p));
+}
+
 async function mergeSimilarLineAnalyses(lineAnalyses, fileName, managerPlan, analyzeWithAIDep) {
   if (!lineAnalyses || lineAnalyses.length === 0) return [];
   if (lineAnalyses.length === 1) return lineAnalyses.map(l => ({ lines: [l.line], comment: l.comment }));
@@ -476,7 +496,9 @@ async function processReviewCommand(octokit, owner, repo, pr, files, dependencie
           if (lineAnalyses.length > 0) {
             lineAnalyses = await mergeSimilarLineAnalyses(lineAnalyses, info.filename, managerPlan, analyzeWithAIDep);
             for (const { lines, comment } of lineAnalyses) {
-              const key = comment.trim().toLowerCase();
+              const trimmed = comment.trim();
+              if (!shouldPostInlineComment(trimmed)) continue;
+              const key = trimmed.toLowerCase();
               if (!postedLineAnalyses.has(key)) {
                 postedLineAnalyses.add(key);
                 try {
@@ -486,7 +508,7 @@ async function processReviewCommand(octokit, owner, repo, pr, files, dependencie
                     pull_number: pr.number,
                     commit_id: pr.head.sha,
                     path: info.filename,
-                    body: `${comment}\n\n_Lines: ${lines.join(', ')}_`,
+                    body: `${trimmed}\n\n_Lines: ${lines.join(', ')}_`,
                     line: lines[0],
                     side: 'RIGHT'
                   });
