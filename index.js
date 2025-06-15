@@ -177,7 +177,9 @@ function shouldPostInlineComment(comment) {
     'nothing to change',
     'nothing to improve',
     'no feedback',
-    'good job'
+    'good job',
+    'no actionable',
+    'no changes',
   ];
   return !skipPhrases.some(p => c.includes(p));
 }
