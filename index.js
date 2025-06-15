@@ -186,6 +186,7 @@ function shouldPostInlineComment(comment) {
     'good job',
     'no actionable',
     'no changes',
+    'no further action'
   ];
   return !skipPhrases.some(p => c.includes(p));
 }
