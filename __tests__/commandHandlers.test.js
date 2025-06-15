@@ -171,6 +171,8 @@ describe('Command Handlers', () => {
       expect(mockOctokit.pulls.createReviewComment).toHaveBeenCalledWith(
         expect.objectContaining({ path: file.filename, line: 3, body: expect.stringContaining('combined') })
       );
+      const updatedBody = mockOctokit.issues.updateComment.mock.calls[0][0].body;
+      expect(updatedBody).toContain('[L3](');
     });
 
     it('skips inline comments when no suggestions are returned', async () => {
