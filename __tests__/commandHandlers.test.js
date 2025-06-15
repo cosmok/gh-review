@@ -342,8 +342,7 @@ describe('Command Handlers', () => {
 
     beforeEach(() => {
       process.env.ENABLE_LABEL_EVENT = 'true';
-      process.env.REVIEW_TRIGGER_LABEL = 'ai-review';
-      process.env.TRIGGER_LABEL = 'dummy-label';
+      process.env.TRIGGER_LABEL = 'ai-review';
       jest.resetModules();
       currentAppModuleForLabelTest = require('../index.js');
       reviewCommandSpy = jest.spyOn(currentAppModuleForLabelTest, 'processReviewCommand').mockResolvedValue(undefined);
@@ -352,7 +351,6 @@ describe('Command Handlers', () => {
 
     afterEach(() => {
       delete process.env.ENABLE_LABEL_EVENT;
-      delete process.env.REVIEW_TRIGGER_LABEL;
       delete process.env.TRIGGER_LABEL;
     });
 
@@ -402,10 +400,17 @@ describe('Command Handlers', () => {
     let whatSpy;
 
     beforeEach(() => {
+      process.env.ENABLE_LABEL_EVENT = 'true';
+      process.env.TRIGGER_LABEL = 'ai-review';
       jest.resetModules();
       currentApp = require('../index.js');
       reviewSpy = jest.spyOn(currentApp, 'processReviewCommand').mockResolvedValue(undefined);
       whatSpy = jest.spyOn(currentApp, 'processWhatCommand').mockResolvedValue('mock summary');
+    });
+
+    afterEach(() => {
+      delete process.env.ENABLE_LABEL_EVENT;
+      delete process.env.TRIGGER_LABEL;
     });
 
     it('triggers review when label matches', async () => {
