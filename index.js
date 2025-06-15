@@ -185,12 +185,27 @@ function shouldPostInlineComment(comment) {
 async function mergeSimilarLineAnalyses(lineAnalyses, fileName, managerPlan, analyzeWithAIDep) {
   if (!lineAnalyses || lineAnalyses.length === 0) return [];
   if (lineAnalyses.length === 1) return lineAnalyses.map(l => ({ lines: [l.line], comment: l.comment }));
-  const prompt = `# Merge Line Comments\n\nGiven multiple line review comments for ${fileName}, merge comments that express similar feedback. Output ONLY a JSON array of objects with \"lines\" (array of line numbers) and \"comment\".`;
+  const prompt = `# Merge Line Comments\n\nGiven multiple line review comments for ${fileName}, merge comments that express similar feedback. For each merged comment output in the following format:\n\nLINES: comma-separated line numbers\nCOMMENT: the merged comment text (may span multiple lines)\nEND_COMMENT\n\nRepeat this block for each merged comment and do not include any other text.`;
   const input = lineAnalyses.map(l => `Line ${l.line}: ${l.comment}`).join('\n');
   const response = await analyzeWithAIDep(prompt, input, fileName, managerPlan);
   try {
-    const parsed = JSON.parse(response);
-    if (Array.isArray(parsed)) return parsed.map(p => ({ lines: p.lines || [], comment: p.comment || '' }));
+    const sections = String(response)
+      .split(/\nEND_COMMENT\s*(?:\n|$)/i)
+      .map(s => s.trim())
+      .filter(Boolean);
+    const merged = [];
+    for (const section of sections) {
+      const match = section.match(/LINES\s*:\s*([0-9,\s]+)[\r\n]+COMMENT\s*:\s*([\s\S]*)/i);
+      if (match) {
+        const lines = match[1]
+          .split(/[,\s]+/)
+          .map(n => parseInt(n, 10))
+          .filter(n => !isNaN(n));
+        const comment = match[2].trim();
+        if (lines.length > 0 && comment) merged.push({ lines, comment });
+      }
+    }
+    if (merged.length > 0) return merged;
   } catch (e) {
     structuredLog('ERROR', 'Failed to parse merged line comments', { file: fileName, error: e.message });
   }

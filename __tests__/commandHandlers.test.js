@@ -155,7 +155,7 @@ describe('Command Handlers', () => {
       const mockAnalyzeWithAIDep = jest.fn()
         .mockResolvedValueOnce('manager plan')
         .mockResolvedValueOnce('file analysis')
-        .mockResolvedValueOnce('[{"lines":[3,4],"comment":"combined"}]')
+        .mockResolvedValueOnce('LINES: 3,4\nCOMMENT: combined\nEND_COMMENT')
         .mockResolvedValueOnce('final summary');
 
       await processReviewCommand(
@@ -192,7 +192,7 @@ describe('Command Handlers', () => {
 
       const mockAnalyzeWithAIDep = jest.fn().mockImplementation((prompt) => {
         if (/Merge Line Comments/.test(prompt)) {
-          return Promise.resolve('[{"lines":[1,2],"comment":"No issues found"}]');
+          return Promise.resolve('LINES: 1,2\nCOMMENT: No issues found\nEND_COMMENT');
         }
         return Promise.resolve('analysis');
       });
