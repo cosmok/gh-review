@@ -503,7 +503,7 @@ async function processReviewCommand(octokit, owner, repo, pr, files, dependencie
           const linesToComment = info.changedLines.slice(0, 3);
           for (const line of linesToComment) {
             const snippet = getSurroundingLines(info.headContent || '', [line], 3);
-            const inlinePrompt = `# Line Review\n\nUsing the manager instructions below, provide feedback for the change around line ${line} in ${info.filename}.\n\n## Manager Instructions\n${managerPlan}\n\n\`\`\`\n${snippet}\n\`\`\``;
+            const inlinePrompt = `# Line Review\n\nUsing the manager instructions below, provide feedback for the change around line ${line} in ${info.filename}.\nIf there are no actionable suggestions return an empty response.\n\n## Manager Instructions\n${managerPlan}\n\n\`\`\`\n${snippet}\n\`\`\``;
             const lineAnalysis = await analyzeWithAIDep(inlinePrompt, snippet, info.filename, info.context);
             if (lineAnalysis) lineAnalyses.push({ line, comment: lineAnalysis.trim() });
           }
