@@ -126,6 +126,19 @@ function removeLeadingMarkdownHeading(text) {
   return text.replace(/^\s*#{1,6}\s.*\n+/, '');
 }
 
+function linkLineNumbers(text, refs, owner, repo, sha) {
+  if (!text || !Array.isArray(refs) || refs.length === 0) return text;
+  let result = text;
+  for (const { file, lines } of refs) {
+    for (const line of lines) {
+      const regex = new RegExp(`\\b[Ll]ine\\s+${line}\\b`, 'g');
+      const link = `[line ${line}](https://github.com/${owner}/${repo}/blob/${sha}/${file}#L${line})`;
+      result = result.replace(regex, link);
+    }
+  }
+  return result;
+}
+
 function getSurroundingLines(content, lineNumbers, contextLines = 10) {
   if (!content) return '';
   const lines = content.split('\n');
@@ -445,6 +458,7 @@ async function processReviewCommand(octokit, owner, repo, pr, files, dependencie
   } = dependencies;
   let reviewComment;
   const postedLineAnalyses = new Set();
+  const referencedLines = [];
   try {
     if (initialComment || octokit.__initialReviewComment) {
       reviewComment = initialComment || octokit.__initialReviewComment;
@@ -512,6 +526,7 @@ async function processReviewCommand(octokit, owner, repo, pr, files, dependencie
                     line: lines[0],
                     side: 'RIGHT'
                   });
+                  referencedLines.push({ file: info.filename, lines });
                 } catch (e) {
                   structuredLog('ERROR', 'Failed to create inline comment', { file: info.filename, line: lines[0], error: e.message, stack: e.stack });
                 }
@@ -532,8 +547,18 @@ async function processReviewCommand(octokit, owner, repo, pr, files, dependencie
     const errors = results.filter(r => r.status === 'error');
     const processingTime = (Date.now() - startTime) / 1000;
 
+    const linkedSummary = linkLineNumbers(removeLeadingMarkdownHeading(finalSummary), referencedLines, owner, repo, pr.head.sha);
     let reviewBody = '';
-    reviewBody += `## 🔍 AI Code Review Summary\n\n${removeLeadingMarkdownHeading(finalSummary)}\n\n`;
+    reviewBody += `## 🔍 AI Code Review Summary\n\n${linkedSummary}\n\n`;
+
+    if (referencedLines.length > 0) {
+      reviewBody += `### 📌 Referenced Lines\n\n`;
+      for (const ref of referencedLines) {
+        const links = ref.lines.map(l => `[L${l}](https://github.com/${owner}/${repo}/blob/${pr.head.sha}/${ref.file}#L${l})`).join(', ');
+        reviewBody += `- ${ref.file}: ${links}\n`;
+      }
+      reviewBody += '\n';
+    }
 
     if (filesWithIssues.length > 0) {
       reviewBody += `## 🚨 Files with Potential Issues\n\n`;
@@ -778,6 +803,7 @@ module.exports = {
   analyzeWithAI,
   truncateToLines,
   removeLeadingMarkdownHeading,
+  linkLineNumbers,
   constants: {
     MAX_FILE_SIZE,
     MAX_DIFF_LENGTH,
