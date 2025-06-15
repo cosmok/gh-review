@@ -604,12 +604,61 @@ async function processReviewCommand(octokit, owner, repo, pr, files, dependencie
   }
 }
 
+async function getInstallationOctokit(context, repository) {
+  const token = await context.octokit.apps.createInstallationAccessToken({
+    installation_id: context.payload.installation.id,
+    repository_ids: [repository.id]
+  }).then(({ data }) => data.token);
+  return new Octokit({ auth: `token ${token}` });
+}
+
+async function handlePrAction(context, repository, prNumber, action) {
+  const repoName = repository.name;
+  const repoOwner = repository.owner.login;
+  const octokit = await getInstallationOctokit(context, repository);
+  const deps = { processFileDiffDep: processFileDiff, analyzeWithAIDep: analyzeWithAI };
+  try {
+    const { data: pr } = await octokit.pulls.get({ owner: repoOwner, repo: repoName, pull_number: prNumber });
+    const { data: files } = await octokit.pulls.listFiles({ owner: repoOwner, repo: repoName, pull_number: prNumber });
+
+    if (action === 'summary') {
+      await module.exports.processWhatCommand(octokit, repoOwner, repoName, pr, files, deps);
+    } else if (action === 'review') {
+      const summary = await module.exports.processWhatCommand(
+        octokit,
+        repoOwner,
+        repoName,
+        pr,
+        files,
+        deps,
+        { returnSummary: true }
+      );
+      const { data: initialComment } = await octokit.issues.createComment({
+        owner: repoOwner,
+        repo: repoName,
+        issue_number: prNumber,
+        body: '🔍 Starting AI code review... This may take a few minutes.'
+      });
+      octokit.__initialReviewComment = initialComment;
+      await module.exports.processReviewCommand(octokit, repoOwner, repoName, pr, files, deps, summary);
+    }
+  } catch (error) {
+    structuredLog('ERROR', 'Error processing PR event', { error: error.message, stack: error.stack });
+    await octokit.issues.createComment({
+      owner: repoOwner,
+      repo: repoName,
+      issue_number: prNumber,
+      body: '❌ An error occurred while processing your request.'
+    });
+  }
+}
+
 // --- registerEventHandlers attaches all Probot event handlers ---
 function registerEventHandlers(probot, options = {}) {
   const {
     enableIssueComment = process.env.ENABLE_ISSUE_COMMENT_EVENT !== 'false',
     enableLabel = process.env.ENABLE_LABEL_EVENT === 'true',
-    reviewLabel = process.env.REVIEW_TRIGGER_LABEL || 'ai-review',
+    reviewLabel = process.env.TRIGGER_LABEL || 'ai-review',
     reviewKeyword = process.env.REVIEW_COMMENT_KEYWORD || '/review',
     summaryKeyword = process.env.SUMMARY_COMMENT_KEYWORD || '/what',
   } = options;
@@ -621,60 +670,9 @@ function registerEventHandlers(probot, options = {}) {
       if (!body.startsWith(summaryKeyword) && !body.startsWith(reviewKeyword)) return;
       if (!issue.pull_request) return;
 
-    const prNumber = issue.number;
-    const { name: repoName, owner } = repository;
-    const repoOwner = owner.login;
-
-    const octokitInstance = new Octokit({
-      auth: `token ${await context.octokit.apps.createInstallationAccessToken({
-        installation_id: context.payload.installation.id,
-        repository_ids: [repository.id]
-      }).then(({ data }) => data.token)}`
-    });
-
-    try {
-      const { data: pr } = await octokitInstance.pulls.get({ owner: repoOwner, repo: repoName, pull_number: prNumber });
-      const { data: files } = await octokitInstance.pulls.listFiles({ owner: repoOwner, repo: repoName, pull_number: prNumber });
-
-      const dependencies = {
-        processFileDiffDep: processFileDiff, // Pass actual functions
-        analyzeWithAIDep: analyzeWithAI
-      };
-
-      if (body.startsWith(summaryKeyword)) {
-        await module.exports.processWhatCommand(octokitInstance, repoOwner, repoName, pr, files, dependencies);
-      } else if (body.startsWith(reviewKeyword)) {
-        const summary = await module.exports.processWhatCommand(
-          octokitInstance,
-          repoOwner,
-          repoName,
-          pr,
-          files,
-          dependencies,
-          { returnSummary: true }
-        );
-        const { data: initialComment } = await octokitInstance.issues.createComment({
-          owner: repoOwner,
-          repo: repoName,
-          issue_number: prNumber,
-          body: '🔍 Starting AI code review... This may take a few minutes.'
-        });
-        // stash the comment on the octokit instance so the command can reuse it
-        octokitInstance.__initialReviewComment = initialComment;
-        await module.exports.processReviewCommand(
-          octokitInstance,
-          repoOwner,
-          repoName,
-          pr,
-          files,
-          dependencies,
-          summary
-        );
-      }
-    } catch (error) {
-      structuredLog('ERROR', 'Error processing PR comment', { error: error.message, stack: error.stack });
-      await octokitInstance.issues.createComment({ owner: repoOwner, repo: repoName, issue_number: prNumber, body: '❌ An error occurred while processing your request.' });
-    }
+      const prNumber = issue.number;
+      const action = body.startsWith(reviewKeyword) ? 'review' : 'summary';
+      await handlePrAction(context, repository, prNumber, action);
     });
   }
 
@@ -682,93 +680,10 @@ function registerEventHandlers(probot, options = {}) {
     probot.on('pull_request.labeled', async (context) => {
       const { label, pull_request: pr, repository } = context.payload;
       if (!label || label.name !== reviewLabel) return;
-
-      const prNumber = pr.number;
-      const { name: repoName, owner } = repository;
-      const repoOwner = owner.login;
-
-      const octokitInstance = new Octokit({
-        auth: `token ${await context.octokit.apps.createInstallationAccessToken({
-          installation_id: context.payload.installation.id,
-          repository_ids: [repository.id]
-        }).then(({ data }) => data.token)}`
-      });
-
-      try {
-        const { data: fullPr } = await octokitInstance.pulls.get({ owner: repoOwner, repo: repoName, pull_number: prNumber });
-        const { data: files } = await octokitInstance.pulls.listFiles({ owner: repoOwner, repo: repoName, pull_number: prNumber });
-
-        const dependencies = { processFileDiffDep: processFileDiff, analyzeWithAIDep: analyzeWithAI };
-        const summary = await module.exports.processWhatCommand(octokitInstance, repoOwner, repoName, fullPr, files, dependencies, { returnSummary: true });
-        const { data: initialComment } = await octokitInstance.issues.createComment({
-          owner: repoOwner,
-          repo: repoName,
-          issue_number: prNumber,
-          body: '🔍 Starting AI code review... This may take a few minutes.'
-        });
-        octokitInstance.__initialReviewComment = initialComment;
-        await module.exports.processReviewCommand(octokitInstance, repoOwner, repoName, fullPr, files, dependencies, summary);
-      } catch (error) {
-        structuredLog('ERROR', 'Error processing label event', { error: error.message, stack: error.stack });
-        await octokitInstance.issues.createComment({ owner: repoOwner, repo: repoName, issue_number: prNumber, body: '❌ An error occurred while processing your request.' });
-      }
+      await handlePrAction(context, repository, pr.number, 'review');
     });
   }
 
-  probot.on('pull_request.labeled', async (context) => {
-    const { pull_request: pr, repository, label } = context.payload;
-    if (!pr || label.name !== TRIGGER_LABEL) return;
-
-    const prNumber = pr.number;
-    const { name: repoName, owner } = repository;
-    const repoOwner = owner.login;
-
-    const octokitInstance = new Octokit({
-      auth: `token ${await context.octokit.apps.createInstallationAccessToken({
-        installation_id: context.payload.installation.id,
-        repository_ids: [repository.id]
-      }).then(({ data }) => data.token)}`
-    });
-
-    try {
-      const { data: prData } = await octokitInstance.pulls.get({ owner: repoOwner, repo: repoName, pull_number: prNumber });
-      const { data: files } = await octokitInstance.pulls.listFiles({ owner: repoOwner, repo: repoName, pull_number: prNumber });
-
-      const dependencies = {
-        processFileDiffDep: processFileDiff,
-        analyzeWithAIDep: analyzeWithAI
-      };
-
-      const summary = await module.exports.processWhatCommand(
-        octokitInstance,
-        repoOwner,
-        repoName,
-        prData,
-        files,
-        dependencies,
-        { returnSummary: true }
-      );
-      const { data: initialComment } = await octokitInstance.issues.createComment({
-        owner: repoOwner,
-        repo: repoName,
-        issue_number: prNumber,
-        body: '🔍 Starting AI code review... This may take a few minutes.'
-      });
-      octokitInstance.__initialReviewComment = initialComment;
-
-      await module.exports.processReviewCommand(
-        octokitInstance,
-        repoOwner,
-        repoName,
-        prData,
-        files,
-        dependencies,
-        summary
-      );
-    } catch (error) {
-      structuredLog('ERROR', 'Error processing PR label event', { error: error.message, stack: error.stack });
-    }
-  });
 
   probot.on('installation.created', async (context) => {
     const { repositories = [] } = context.payload;

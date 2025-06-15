@@ -52,7 +52,7 @@ A GitHub App that uses Google's GenAI (Vertex AI) with Gemini to provide intelli
    - (Optional) Control event triggers with:
      - `ENABLE_ISSUE_COMMENT_EVENT` (`true` by default)
      - `ENABLE_LABEL_EVENT` (`false` by default)
-     - `REVIEW_TRIGGER_LABEL` (label name to trigger review, default `ai-review`)
+     - `TRIGGER_LABEL` (label name to trigger review, default `ai-review`)
      - `REVIEW_COMMENT_KEYWORD` (default `/review`)
      - `SUMMARY_COMMENT_KEYWORD` (default `/what`)
 
@@ -68,8 +68,15 @@ A GitHub App that uses Google's GenAI (Vertex AI) with Gemini to provide intelli
 
    For development with auto-reload:
    ```bash
-   npm run dev
-   ```
+  npm run dev
+  ```
+
+## Security
+
+This app verifies every GitHub webhook using the `WEBHOOK_SECRET` you configure.
+Only signed requests from GitHub are processed. The service also exchanges the
+installation ID for a short-lived access token on each request so all GitHub API
+calls are properly authenticated and scoped to your repository.
 
 ## Development
 
