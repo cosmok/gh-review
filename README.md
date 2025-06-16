@@ -17,6 +17,10 @@ A GitHub App that uses Google's GenAI (Vertex AI) with Gemini to provide intelli
 - **Supports Multiple Languages**: Works with various programming languages
 - **Focused Feedback**: Only reports issues with high confidence
 
+## Review Workflow
+
+All prompts used for AI analysis live under the `prompts/` directory. The app loads these templates at runtime and fills in variables such as the file name or manager instructions before sending them to Gemini. Editing the text files allows you to tweak the review style without changing code.
+
 ## Setup
 
 1. **Create a GitHub App**
