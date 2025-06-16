@@ -68,8 +68,8 @@ A GitHub App that uses Google's GenAI (Vertex AI) with Gemini to provide intelli
 
    For development with auto-reload:
    ```bash
-  npm run dev
-  ```
+   npm run dev
+   ```
 
 ## Security
 
@@ -96,6 +96,11 @@ You can deploy this app to any Node.js hosting platform like:
 
 1. Build and deploy your container image as you normally would.
 2. Ensure the container executes `npm start` (which runs `node index.js`).
+3. Alternatively, you can use the `gcloud run deploy` command to deploy the app
+   from the command line.
+   ```bash
+   gcloud run deploy github-pr-reviewer --source . --region australia-southeast1
+   ```
 
 Make sure to set the environment variables in your hosting platform's configuration.
 
