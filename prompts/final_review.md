@@ -1,3 +1,6 @@
 # Final Review
 
-Combine related comments from the reviewer, remove duplicates, and fix any issues in the feedback.
+Please perform the following actions on the provided reviewer comments:
+* Combine related comments.
+* Remove duplicate comments.
+* Refine the feedback for clarity, conciseness, formatting and correctness.
