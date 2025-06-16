@@ -6,6 +6,18 @@ const { GoogleGenAI } = require('@google/genai');
 const pLimit = require("p-limit").default || require("p-limit");
 const { createTwoFilesPatch } = require('diff');
 const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
+
+function loadPrompt(filename, values = {}) {
+  const fullPath = path.join(__dirname, 'prompts', filename);
+  let template = fs.readFileSync(fullPath, 'utf8');
+  for (const [key, val] of Object.entries(values)) {
+    const regex = new RegExp(`{{\s*${key}\s*}}`, 'g');
+    template = template.replace(regex, val);
+  }
+  return template;
+}
 
 // Configuration constants
 function structuredLog(severity, message, fields = {}) {
@@ -194,7 +206,7 @@ function shouldPostInlineComment(comment) {
 async function mergeSimilarLineAnalyses(lineAnalyses, fileName, managerPlan, analyzeWithAIDep) {
   if (!lineAnalyses || lineAnalyses.length === 0) return [];
   if (lineAnalyses.length === 1) return lineAnalyses.map(l => ({ lines: [l.line], comment: l.comment }));
-  const prompt = `# Merge Line Comments\n\nGiven multiple line review comments for ${fileName}, merge comments that express similar feedback. For each merged comment output in the following format:\n\nLINES: comma-separated line numbers\nCOMMENT: the merged comment text (may span multiple lines)\nEND_COMMENT\n\nRepeat this block for each merged comment and do not include any other text.`;
+  const prompt = loadPrompt('merge_line_comments.md', { fileName });
   const input = lineAnalyses.map(l => `Line ${l.line}: ${l.comment}`).join('\n');
   const response = await analyzeWithAIDep(prompt, input, fileName, managerPlan);
   try {
@@ -456,7 +468,12 @@ async function processWhatCommand(octokit, owner, repo, pr, files, dependencies 
       .catch(error => { structuredLog('ERROR', 'Error getting PR diff', { error: error.message, stack: error.stack }); throw new Error('Failed to retrieve PR diff.'); });
     const diff = typeof data === 'string' ? data : data.diff;
     
-    const prompt = `# PR Summary Request\n\n## PR Details\n- Title: ${pr.title}\n- Author: ${pr.user?.login || 'Unknown'}\n- Changed Files: ${files.length} files with ${files.reduce((a, f) => a + f.changes, 0)} changes\n\n## Instructions\nPlease provide a concise summary of the changes in this pull request.\nFocus on the main purpose and key changes. Be brief and to the point.\nHighlight any major architectural changes or potential impacts.`;
+    const changed = `${files.length} files with ${files.reduce((a, f) => a + f.changes, 0)} changes`;
+    const prompt = loadPrompt('pr_summary_request.md', {
+      prTitle: pr.title,
+      prAuthor: pr.user?.login || 'Unknown',
+      changedFiles: changed
+    });
     if (returnSummary) {
       const analysis = await analyzeWithAIDep(prompt, diff, 'PR Summary');
       return analysis || '';
@@ -513,13 +530,16 @@ async function processReviewCommand(octokit, owner, repo, pr, files, dependencie
       .map(f => `### ${f.info.filename}\n${f.info.diff}`)
       .join('\n');
 
-    const managerPrompt = `# Manager Summary\n\nSummarize the changes in this pull request and provide brief instructions for the reviewer. The manager does not need to perform a detailed review.`;
+    const managerPrompt = loadPrompt('manager_summary.md');
     const managerPlan = await analyzeWithAIDep(managerPrompt, combinedDiff, 'Manager Plan', commitMessages);
 
       const results = await Promise.all(fileInfos.map(f => limit(async () => {
         if (f.status !== 'ok') return { filename: f.filename, status: 'error', error: f.error };
         const { info } = f;
-        const reviewerPrompt = `# Reviewer Task\n\nFollow the manager instructions below to review ${info.filename}. Focus on the blocks highlighted.\n\n## Manager Instructions\n${managerPlan}\n`;
+        const reviewerPrompt = loadPrompt('reviewer_task.md', {
+          fileName: info.filename,
+          managerPlan
+        });
         const analysis = await analyzeWithAIDep(reviewerPrompt, info.diff, info.filename, info.context);
 
         let lineAnalyses = [];
@@ -527,7 +547,12 @@ async function processReviewCommand(octokit, owner, repo, pr, files, dependencie
           const linesToComment = info.changedLines.slice(0, 3);
           for (const line of linesToComment) {
             const snippet = getSurroundingLines(info.headContent || '', [line], 3);
-            const inlinePrompt = `# Line Review\n\nUsing the manager instructions below, provide feedback for the change around line ${line} in ${info.filename}.\nIf there are no actionable suggestions return an empty response.\n\n## Manager Instructions\n${managerPlan}\n\n\`\`\`\n${snippet}\n\`\`\``;
+            const inlinePrompt = loadPrompt('line_review.md', {
+              line,
+              fileName: info.filename,
+              managerPlan,
+              snippet
+            });
             const lineAnalysis = await analyzeWithAIDep(inlinePrompt, snippet, info.filename, info.context);
             if (lineAnalysis) lineAnalyses.push({ line, comment: lineAnalysis.trim() });
           }
@@ -563,7 +588,7 @@ async function processReviewCommand(octokit, owner, repo, pr, files, dependencie
       })));
 
     const combinedReviews = results.filter(r => r.analysis).map(r => `### ${r.filename}\n${r.analysis}`).join('\n');
-    const finalPrompt = `# Final Review\n\nCombine related comments from the reviewer, remove duplicates, and fix any issues in the feedback.`;
+    const finalPrompt = loadPrompt('final_review.md');
     const finalSummary = await analyzeWithAIDep(finalPrompt, combinedReviews, 'Manager Final', managerPlan);
 
     const successfulReviews = results.filter(r => r.status === 'reviewed' && r.analysis);
