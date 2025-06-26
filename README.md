@@ -21,6 +21,8 @@ A GitHub App that uses Google's GenAI (Vertex AI) with Gemini to provide intelli
 
 All prompts used for AI analysis live under the `prompts/` directory. The app loads these templates at runtime and fills in variables such as the file name or manager instructions before sending them to Gemini. Editing the text files allows you to tweak the review style without changing code.
 
+To customise the review behaviour for a repository, add a file named `AI_REVIEW_INSTRUCTIONS.md` to the repository root or within any folder. The contents of the closest instructions file are inserted into the review prompts for files in that directory. See `AI_REVIEW_INSTRUCTIONS_TEMPLATE.md` for an example template.
+
 ## Setup
 
 1. **Create a GitHub App**

@@ -7,6 +7,7 @@ process.env.WEBHOOK_SECRET = 'test-secret';
 process.env.GOOGLE_CLOUD_PROJECT = 'test-project';
 process.env.GOOGLE_CLOUD_LOCATION = 'us-central1';
 process.env.GOOGLE_APPLICATION_CREDENTIALS = 'test-credentials.json';
+process.env.ENABLE_REPO_INSTRUCTIONS = 'false';
 
 // Mock console methods to keep test output clean
 console.log = jest.fn();
