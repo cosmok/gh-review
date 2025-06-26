@@ -46,6 +46,8 @@ const MAX_CONTEXT_LINES = parseInt(process.env.MAX_CONTEXT_LINES || '200', 10);
 const REQUEST_TIMEOUT = parseInt(process.env.REQUEST_TIMEOUT || '30000', 10);
 const CONCURRENCY_LIMIT = parseInt(process.env.CONCURRENCY_LIMIT || '3', 10);
 const MAX_FILES_TO_PROCESS = parseInt(process.env.MAX_FILES_TO_PROCESS || '20', 10);
+const INSTRUCTION_FILENAME = process.env.INSTRUCTION_FILENAME || 'AI_REVIEW_INSTRUCTIONS.md';
+const ENABLE_REPO_INSTRUCTIONS = process.env.ENABLE_REPO_INSTRUCTIONS !== 'false';
 // Label that triggers an AI review when added to a PR
 const TRIGGER_LABEL = process.env.TRIGGER_LABEL || 'ai-review';
 
@@ -277,6 +279,24 @@ async function getCommitMessages(octokit, owner, repo, prNumber) {
   }
 }
 
+async function getRepoInstructions(octokit, owner, repo, filePath, ref) {
+  if (!ENABLE_REPO_INSTRUCTIONS) return '';
+  const parts = path.posix.dirname(filePath).split('/');
+  for (let i = parts.length; i >= 0; i--) {
+    const dir = parts.slice(0, i).join('/');
+    const searchPath = path.posix.join(dir || '', INSTRUCTION_FILENAME);
+    try {
+      const content = await getFileContent(octokit, owner, repo, searchPath, ref);
+      if (content && !content.startsWith('[File not found')) return content;
+    } catch (e) {
+      if (e.status !== 404) {
+        structuredLog('ERROR', 'Error reading repo instructions', { path: searchPath, error: e.message });
+      }
+    }
+  }
+  return '';
+}
+
 function getChangedLineNumbers(diff) {
   if (!diff) return { headLines: [], baseLines: [] };
   const headLines = [];
@@ -414,12 +434,14 @@ async function processFileDiff(octokit, owner, repo, file, pr) {
     diff: '',
     context: '',
     changedLines: [],
-    headContent: ''
+    headContent: '',
+    instructions: ''
   };
   try {
     if (file.filename.match(/\.(png|jpg|jpeg|gif|ico|svg|pdf|zip|tar\.gz|tgz|gz|7z|rar|exe|dll|so|a|o|pyc|pyo|pyd|class|jar|war|ear|bin|dat|db|sqlite|sqlite3)$/i)) {
       fileInfo.error = 'Binary file - skipped'; return fileInfo;
     }
+    fileInfo.instructions = await getRepoInstructions(octokit, owner, repo, file.filename, pr.head.sha);
     const diff = file.patch ? file.patch : '';
     if (file.status === 'added') {
       fileInfo.diff = diff.length > MAX_DIFF_LENGTH ? diff.substring(0, MAX_DIFF_LENGTH) + '\n[...truncated...]' : diff;
@@ -538,7 +560,8 @@ async function processReviewCommand(octokit, owner, repo, pr, files, dependencie
         const { info } = f;
         const reviewerPrompt = loadPrompt('reviewer_task.md', {
           fileName: info.filename,
-          managerPlan
+          managerPlan,
+          repoInstructions: info.instructions || ''
         });
         const analysis = await analyzeWithAIDep(reviewerPrompt, info.diff, info.filename, info.context);
 
@@ -551,7 +574,8 @@ async function processReviewCommand(octokit, owner, repo, pr, files, dependencie
               line,
               fileName: info.filename,
               managerPlan,
-              snippet
+              snippet,
+              repoInstructions: info.instructions || ''
             });
             const lineAnalysis = await analyzeWithAIDep(inlinePrompt, snippet, info.filename, info.context);
             if (lineAnalysis) lineAnalyses.push({ line, comment: lineAnalysis.trim() });
@@ -769,6 +793,7 @@ module.exports = {
   truncateToLines,
   removeLeadingMarkdownHeading,
   linkLineNumbers,
+  getRepoInstructions,
   constants: {
     MAX_FILE_SIZE,
     MAX_DIFF_LENGTH,
@@ -777,7 +802,9 @@ module.exports = {
     REQUEST_TIMEOUT,
     CONCURRENCY_LIMIT,
     MAX_FILES_TO_PROCESS,
-    TRIGGER_LABEL
+    TRIGGER_LABEL,
+    INSTRUCTION_FILENAME,
+    ENABLE_REPO_INSTRUCTIONS
   }
 };
 
