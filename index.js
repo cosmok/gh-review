@@ -3,6 +3,7 @@ require('dotenv').config();
 const { Probot } = require('probot');
 const { Octokit } = require('@octokit/rest');
 const { GoogleGenAI } = require('@google/genai');
+const { OpenAI } = require('openai');
 const pLimit = require("p-limit").default || require("p-limit");
 const { createTwoFilesPatch } = require('diff');
 const crypto = require('crypto');
@@ -48,6 +49,8 @@ const CONCURRENCY_LIMIT = parseInt(process.env.CONCURRENCY_LIMIT || '3', 10);
 const MAX_FILES_TO_PROCESS = parseInt(process.env.MAX_FILES_TO_PROCESS || '20', 10);
 const INSTRUCTION_FILENAME = process.env.INSTRUCTION_FILENAME || 'AI_REVIEW_INSTRUCTIONS.md';
 const ENABLE_REPO_INSTRUCTIONS = process.env.ENABLE_REPO_INSTRUCTIONS !== 'false';
+const LLM_PROVIDER = process.env.LLM_PROVIDER || 'google';
+const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-3.5-turbo';
 // Label that triggers an AI review when added to a PR
 const TRIGGER_LABEL = process.env.TRIGGER_LABEL || 'ai-review';
 
@@ -56,9 +59,12 @@ const requiredVars = [
   'APP_ID',
   'PRIVATE_KEY',
   'WEBHOOK_SECRET',
-  'GOOGLE_CLOUD_PROJECT',
-  'GOOGLE_CLOUD_LOCATION',
 ];
+if (LLM_PROVIDER === 'google') {
+  requiredVars.push('GOOGLE_CLOUD_PROJECT', 'GOOGLE_CLOUD_LOCATION');
+} else if (LLM_PROVIDER === 'openai') {
+  requiredVars.push('OPENAI_API_KEY');
+}
 
 for (const varName of requiredVars) {
   if (!process.env[varName]) {
@@ -70,22 +76,29 @@ for (const varName of requiredVars) {
 // Initialize rate limiter
 const limit = pLimit(CONCURRENCY_LIMIT);
 
-// Initialize Google GenAI (using Vertex AI under the hood)
-// If GOOGLE_CLOUD_PROJECT or GOOGLE_CLOUD_LOCATION are not set, this might error early.
+// Initialize LLM providers
 let genAI;
-try {
-  genAI = new GoogleGenAI({
-    vertexai: true,
-    project: process.env.GOOGLE_CLOUD_PROJECT,
-    location: process.env.GOOGLE_CLOUD_LOCATION,
-  });
-} catch (e) {
-  structuredLog('ERROR', 'Failed to initialize GoogleGenAI', { error: e.message, stack: e.stack });
-  // Decide if process should exit or if this is recoverable/testable
+let openai;
+if (LLM_PROVIDER === 'google') {
+  try {
+    genAI = new GoogleGenAI({
+      vertexai: true,
+      project: process.env.GOOGLE_CLOUD_PROJECT,
+      location: process.env.GOOGLE_CLOUD_LOCATION,
+    });
+  } catch (e) {
+    structuredLog('ERROR', 'Failed to initialize GoogleGenAI', { error: e.message, stack: e.stack });
+  }
+} else if (LLM_PROVIDER === 'openai') {
+  try {
+    openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  } catch (e) {
+    structuredLog('ERROR', 'Failed to initialize OpenAI', { error: e.message, stack: e.stack });
+  }
 }
 
 
-// Initialize the AI model -- allow override via environment variable
+// Initialize the AI model -- allow override via environment variables
 const model = process.env.GENAI_MODEL || 'gemini-2.5-flash-preview-05-20';
 
 // --- Helper functions (analyzeWithAI, truncateToLines, etc.) remain in module scope ---
@@ -95,16 +108,29 @@ async function analyzeWithAI(prompt, codeSnippet, filePath, context = '') {
   try {
     const truncatedSnippet = truncateToLines(codeSnippet, MAX_DIFF_LINES);
     const truncatedContext = context ? truncateToLines(context, MAX_CONTEXT_LINES) : '';
-    const generationConfig = {
-      maxOutputTokens: 4096, temperature: 0.2, topP: 0.8, topK: 40,
-    };
-    const result = await genAI.models.generateContent({
-      model,
-      contents: [{ role: 'user', parts: [{ text: `# Code Review Task: ${filePath}\n\n## Context\n${truncatedContext || 'No additional context provided.'}\n\n## Changes\n\`\`\`diff\n${truncatedSnippet}\n\`\`\`\n\n## Instructions\n${prompt}\n\n## Guidelines\n- Be specific and reference line numbers from the diff\n- Only report issues you're certain about\n- Suggest concrete improvements when possible` }] }],
-      config: generationConfig,
-    });
+    const generationConfig = { maxOutputTokens: 4096, temperature: 0.2, topP: 0.8, topK: 40 };
+
+    let resultText = '';
+    if (LLM_PROVIDER === 'openai') {
+      const messages = [{ role: 'user', content: `# Code Review Task: ${filePath}\n\n## Context\n${truncatedContext || 'No additional context provided.'}\n\n## Changes\n\`\`\`diff\n${truncatedSnippet}\n\`\`\`\n\n## Instructions\n${prompt}\n\n## Guidelines\n- Be specific and reference line numbers from the diff\n- Only report issues you're certain about\n- Suggest concrete improvements when possible` }];
+      const resp = await openai.chat.completions.create({
+        model: OPENAI_MODEL,
+        messages,
+        temperature: generationConfig.temperature,
+        max_tokens: generationConfig.maxOutputTokens,
+        timeout: REQUEST_TIMEOUT,
+      });
+      resultText = resp.choices?.[0]?.message?.content || '';
+    } else {
+      const result = await genAI.models.generateContent({
+        model,
+        contents: [{ role: 'user', parts: [{ text: `# Code Review Task: ${filePath}\n\n## Context\n${truncatedContext || 'No additional context provided.'}\n\n## Changes\n\`\`\`diff\n${truncatedSnippet}\n\`\`\`\n\n## Instructions\n${prompt}\n\n## Guidelines\n- Be specific and reference line numbers from the diff\n- Only report issues you're certain about\n- Suggest concrete improvements when possible` }] }],
+        config: generationConfig,
+      });
+      resultText = result.text;
+    }
     clearTimeout(timeoutId);
-    return result.text;
+    return resultText;
   } catch (error) {
     clearTimeout(timeoutId);
     if (error.name === 'AbortError') {
@@ -112,7 +138,9 @@ async function analyzeWithAI(prompt, codeSnippet, filePath, context = '') {
       return 'Analysis timed out. The diff might be too large or the service might be busy.';
     }
     let message = error.message || 'Unknown error';
-    if (message.includes('Unexpected token') && message.includes('<')) {
+    if (LLM_PROVIDER === 'openai' && message.includes('401')) {
+      message = 'OpenAI authentication failed. Check your API key.';
+    } else if (message.includes('Unexpected token') && message.includes('<')) {
       message = 'Google GenAI returned an invalid response. Check your credentials and network settings.';
     }
     const previewSource = error.response?.data || error.stack || '';

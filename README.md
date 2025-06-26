@@ -1,10 +1,10 @@
 # AI-Powered GitHub PR Reviewer
 
-A GitHub App that uses Google's GenAI (Vertex AI) with Gemini to provide intelligent code reviews for pull requests. Requires **Node.js 18+**.
+A GitHub App that uses Large Language Models to provide intelligent code reviews for pull requests. Requires **Node.js 18+**. It supports Google's GenAI and OpenAI models.
 
 ## Features
 
-- **AI-Powered Code Review**: Uses Google's GenAI with Gemini to analyze code
+- **AI-Powered Code Review**: Uses either Google's GenAI or OpenAI models to analyze code
 - **Commands**:
   - `/review`: Generates a PR summary and performs a deep code review
   - `/what`: (optional) Only produce the summary of changes
@@ -50,6 +50,9 @@ To customise the review behaviour for a repository, add a file named `AI_REVIEW_
    - Set `APP_ID`, `PRIVATE_KEY`, and `WEBHOOK_SECRET` with the credentials from the app you created
    - For the private key, copy the contents of the downloaded `.pem` file and format it as a single line with `\n` for newlines
    - (Optional) Set `GENAI_MODEL` to override the default Gemini model
+   - (Optional) Set `LLM_PROVIDER` to `google` (default) or `openai`
+   - (Optional) Set `OPENAI_API_KEY` when using the OpenAI provider
+   - (Optional) Set `OPENAI_MODEL` to override the default OpenAI model
    - (Optional) Set `PORT` for local testing (default `3000`)
    - (Optional) Tune limits with:
      - `MAX_FILES_TO_PROCESS` (default 20)

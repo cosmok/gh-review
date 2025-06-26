@@ -27,6 +27,21 @@ jest.mock('@google/genai', () => {
   };
 });
 
+// Mock OpenAI library
+jest.mock('openai', () => {
+  return {
+    OpenAI: jest.fn().mockImplementation(() => ({
+      chat: {
+        completions: {
+          create: jest.fn().mockResolvedValue({
+            choices: [{ message: { content: 'Mock OpenAI response' } }]
+          })
+        }
+      }
+    }))
+  };
+});
+
 // Mock p-limit to execute functions immediately
 jest.mock('p-limit', () => {
   return jest.fn(() => {
