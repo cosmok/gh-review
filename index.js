@@ -2,7 +2,7 @@
 require('dotenv').config();
 const { Probot } = require('probot');
 const { Octokit } = require('@octokit/rest');
-const { GoogleGenAI } = require('@google/genai');
+const { createClient } = require('./llm');
 const pLimit = require("p-limit").default || require("p-limit");
 const { createTwoFilesPatch } = require('diff');
 const crypto = require('crypto');
@@ -56,8 +56,6 @@ const requiredVars = [
   'APP_ID',
   'PRIVATE_KEY',
   'WEBHOOK_SECRET',
-  'GOOGLE_CLOUD_PROJECT',
-  'GOOGLE_CLOUD_LOCATION',
 ];
 
 for (const varName of requiredVars) {
@@ -70,23 +68,17 @@ for (const varName of requiredVars) {
 // Initialize rate limiter
 const limit = pLimit(CONCURRENCY_LIMIT);
 
-// Initialize Google GenAI (using Vertex AI under the hood)
-// If GOOGLE_CLOUD_PROJECT or GOOGLE_CLOUD_LOCATION are not set, this might error early.
-let genAI;
+// Initialize the LLM client based on configuration (Google, OpenAI, Anthropic)
+let llmClient;
 try {
-  genAI = new GoogleGenAI({
-    vertexai: true,
-    project: process.env.GOOGLE_CLOUD_PROJECT,
-    location: process.env.GOOGLE_CLOUD_LOCATION,
-  });
+  llmClient = createClient();
 } catch (e) {
-  structuredLog('ERROR', 'Failed to initialize GoogleGenAI', { error: e.message, stack: e.stack });
-  // Decide if process should exit or if this is recoverable/testable
+  structuredLog('ERROR', 'Failed to initialize LLM client', { error: e.message, stack: e.stack });
 }
 
 
-// Initialize the AI model -- allow override via environment variable
-const model = process.env.GENAI_MODEL || 'gemini-2.5-flash-preview-05-20';
+// Default model for Google provider (others use their own defaults)
+const defaultModel = process.env.GENAI_MODEL || 'gemini-2.5-flash-preview-05-20';
 
 // --- Helper functions (analyzeWithAI, truncateToLines, etc.) remain in module scope ---
 async function analyzeWithAI(prompt, codeSnippet, filePath, context = '') {
@@ -95,16 +87,10 @@ async function analyzeWithAI(prompt, codeSnippet, filePath, context = '') {
   try {
     const truncatedSnippet = truncateToLines(codeSnippet, MAX_DIFF_LINES);
     const truncatedContext = context ? truncateToLines(context, MAX_CONTEXT_LINES) : '';
-    const generationConfig = {
-      maxOutputTokens: 4096, temperature: 0.2, topP: 0.8, topK: 40,
-    };
-    const result = await genAI.models.generateContent({
-      model,
-      contents: [{ role: 'user', parts: [{ text: `# Code Review Task: ${filePath}\n\n## Context\n${truncatedContext || 'No additional context provided.'}\n\n## Changes\n\`\`\`diff\n${truncatedSnippet}\n\`\`\`\n\n## Instructions\n${prompt}\n\n## Guidelines\n- Be specific and reference line numbers from the diff\n- Only report issues you're certain about\n- Suggest concrete improvements when possible` }] }],
-      config: generationConfig,
-    });
+    const message = `# Code Review Task: ${filePath}\n\n## Context\n${truncatedContext || 'No additional context provided.'}\n\n## Changes\n\`\`\`diff\n${truncatedSnippet}\n\`\`\`\n\n## Instructions\n${prompt}\n\n## Guidelines\n- Be specific and reference line numbers from the diff\n- Only report issues you're certain about\n- Suggest concrete improvements when possible`;
+    const resultText = await llmClient.generate(message, { model: defaultModel });
     clearTimeout(timeoutId);
-    return result.text;
+    return resultText;
   } catch (error) {
     clearTimeout(timeoutId);
     if (error.name === 'AbortError') {
@@ -113,7 +99,7 @@ async function analyzeWithAI(prompt, codeSnippet, filePath, context = '') {
     }
     let message = error.message || 'Unknown error';
     if (message.includes('Unexpected token') && message.includes('<')) {
-      message = 'Google GenAI returned an invalid response. Check your credentials and network settings.';
+      message = 'LLM service returned an invalid response. Check your credentials and network settings.';
     }
     const previewSource = error.response?.data || error.stack || '';
     const preview = typeof previewSource === 'string'
@@ -641,7 +627,7 @@ async function processReviewCommand(octokit, owner, repo, pr, files, dependencie
 
     if (errors.length > 0) reviewBody += `## ⚠️ Processing Errors\n\nThe following files could not be processed:\n${errors.map(e => `- ${e.filename}: ${e.error || 'Unknown error'}`).join('\n')}\n\n`;
 
-    reviewBody += '---\n🔍 This is an automated review powered by Google GenAI.\n⚠️ This is a best-effort review and may not catch all issues.\n🔍 Always perform your own thorough review before merging.\n⏱️ Total processing time: ' + processingTime.toFixed(1) + 's';
+    reviewBody += '---\n🔍 This is an automated review powered by AI.\n⚠️ This is a best-effort review and may not catch all issues.\n🔍 Always perform your own thorough review before merging.\n⏱️ Total processing time: ' + processingTime.toFixed(1) + 's';
     await octokit.issues.updateComment({ owner, repo, comment_id: reviewComment.id, body: reviewBody });
   } catch (error) {
     structuredLog('ERROR', 'Error in processReviewCommand', { error: error.message, stack: error.stack });

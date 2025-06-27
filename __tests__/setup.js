@@ -27,6 +27,34 @@ jest.mock('@google/genai', () => {
   };
 });
 
+// Mock OpenAI library
+jest.mock('openai', () => {
+  return {
+    OpenAI: jest.fn().mockImplementation(() => ({
+      chat: {
+        completions: {
+          create: jest.fn().mockResolvedValue({
+            choices: [{ message: { content: 'OpenAI response' } }]
+          })
+        }
+      }
+    }))
+  };
+});
+
+// Mock Anthropic library
+jest.mock('@anthropic-ai/sdk', () => {
+  return {
+    Anthropic: jest.fn().mockImplementation(() => ({
+      messages: {
+        create: jest.fn().mockResolvedValue({
+          content: [{ text: 'Claude response' }]
+        })
+      }
+    }))
+  };
+});
+
 // Mock p-limit to execute functions immediately
 jest.mock('p-limit', () => {
   return jest.fn(() => {
