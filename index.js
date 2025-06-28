@@ -47,7 +47,7 @@ const REQUEST_TIMEOUT = parseInt(process.env.REQUEST_TIMEOUT || '30000', 10);
 const CONCURRENCY_LIMIT = parseInt(process.env.CONCURRENCY_LIMIT || '3', 10);
 const MAX_FILES_TO_PROCESS = parseInt(process.env.MAX_FILES_TO_PROCESS || '20', 10);
 const INSTRUCTION_FILENAME = process.env.INSTRUCTION_FILENAME || 'AI_REVIEW_INSTRUCTIONS.md';
-const ENABLE_REPO_INSTRUCTIONS = process.env.ENABLE_REPO_INSTRUCTIONS !== 'false';
+const ENABLE_REPO_INSTRUCTIONS = (process.env.ENABLE_REPO_INSTRUCTIONS  &&  process.env.ENABLE_REPO_INSTRUCTIONS == 'true') ? true : false;
 // Label that triggers an AI review when added to a PR
 const TRIGGER_LABEL = process.env.TRIGGER_LABEL || 'ai-review';
 
