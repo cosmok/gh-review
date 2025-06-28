@@ -49,7 +49,9 @@ To customise the review behaviour for a repository, add a file named `AI_REVIEW_
    - Fill in the values from your GitHub App settings
    - Set `APP_ID`, `PRIVATE_KEY`, and `WEBHOOK_SECRET` with the credentials from the app you created
    - For the private key, copy the contents of the downloaded `.pem` file and format it as a single line with `\n` for newlines
-   - (Optional) Set `GENAI_MODEL` to override the default Gemini model
+   - (Optional) Choose an AI provider with `LLM_PROVIDER` (`google`, `openai`, `anthropic`)
+   - (Optional) Set `GENAI_MODEL`, `OPENAI_MODEL`, or `ANTHROPIC_MODEL` to override defaults
+   - (Optional) Provide provider API keys with `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`
    - (Optional) Set `PORT` for local testing (default `3000`)
    - (Optional) Tune limits with:
      - `MAX_FILES_TO_PROCESS` (default 20)
