@@ -698,6 +698,9 @@ async function processReviewCommand(octokit, owner, repo, pr, files, dependencie
 }
 
 async function processReviewCommentReply(octokit, owner, repo, prNumber, comment, parent, requestText = '') {
+  if (!octokit || !owner || !repo || !prNumber || !comment || !parent) {
+    throw new Error('Missing required parameters');
+  }
   try {
     const prompt = loadPrompt('comment_reply.md', {
       comment: parent.body || '',
@@ -710,12 +713,23 @@ async function processReviewCommentReply(octokit, owner, repo, prNumber, comment
         owner,
         repo,
         pull_number: prNumber,
-        comment_id: comment.id,
+        comment_id: parent.id,
         body: response.trim()
       });
     }
   } catch (error) {
     structuredLog('ERROR', 'Error in processReviewCommentReply', { error: error.message, stack: error.stack });
+    try {
+      await octokit.pulls.createReplyForReviewComment({
+        owner,
+        repo,
+        pull_number: prNumber,
+        comment_id: parent.id,
+        body: `❌ Error processing review request: ${error.message}`
+      });
+    } catch (replyError) {
+      structuredLog('ERROR', 'Failed to post error reply', { error: replyError.message });
+    }
   }
 }
 
@@ -807,8 +821,8 @@ function registerEventHandlers(probot, options = {}) {
       structuredLog('ERROR', 'Failed to fetch parent comment', { error: e.message, stack: e.stack });
       return;
     }
-    const extra = body.slice(reviewKeyword.length).trim();
-    await module.exports.processReviewCommentReply(octokit, repoOwner, repoName, prNumber, comment, parent, extra);
+    const userRequest = body.slice(reviewKeyword.length).trim();
+    await module.exports.processReviewCommentReply(octokit, repoOwner, repoName, prNumber, comment, parent, userRequest);
   });
 
   if (enableLabel) {
