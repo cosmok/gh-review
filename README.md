@@ -10,6 +10,7 @@ A GitHub App that uses Google's GenAI (Vertex AI) with Gemini to provide intelli
 - **Commands**:
   - `/review`: Generates a PR summary and performs a deep code review
   - `/what`: (optional) Only produce the summary of changes
+- **Inline Comment Replies**: Respond to review comment threads with `/review` to analyze a specific diff snippet
 - **Configurable Triggers**: Enable reactions to custom comment keywords or pull request labels
 - **Intelligent Analysis**:
   - Identifies bugs and logical errors
@@ -34,13 +35,15 @@ To customise the review behaviour for a repository, add a file named `AI_REVIEW_
    - Set the Homepage URL to your repository URL
    - Set the Webhook URL to your server URL (e.g., `https://your-domain.com`)
    - Set the Webhook Secret (generate a random string)
-   - Under "Permissions", set:
-     - Pull requests: Read & Write
-     - Contents: Read-only
-   - Under "Subscribe to events", select:
-     - Pull request
-     - Issue comment
-     - Installation
+  - Under "Permissions", set:
+    - Pull requests: Read & Write
+    - Contents: Read-only
+    - Pull request review comments: Read & Write
+  - Under "Subscribe to events", select:
+    - Pull request
+    - Issue comment
+    - Pull request review comment
+    - Installation
    - Click "Create GitHub App"
    - Generate a private key and download it
    - Deploy your `gh-review` service and update the GitHub App's webhook URL
