@@ -6,7 +6,8 @@ const {
   processReviewCommand,
   processWhatCommand,
   processFileDiff,
-  analyzeWithAI
+  analyzeWithAI,
+  processReviewCommentReply
 } = appModule;
 
 // privateKey is now solely set in __tests__/setup.js via process.env.PRIVATE_KEY
@@ -26,6 +27,20 @@ const prLabeledPayload = {
   repository: { name: 'test-repo', owner: { login: 'test-owner' }, full_name: 'test-owner/test-repo' },
   installation: { id: 2 },
   label: { name: 'ai-review' },
+};
+
+const reviewCommentPayload = {
+  action: 'created',
+  pull_request: { number: 1 },
+  repository: { name: 'test-repo', owner: { login: 'test-owner' }, full_name: 'test-owner/test-repo' },
+  installation: { id: 2 },
+  comment: {
+    id: 10,
+    body: '',
+    in_reply_to_id: 5,
+    path: 'file.js',
+    diff_hunk: '@@ line @@\n+code'
+  }
 };
 
 describe('Command Handlers', () => {
@@ -447,6 +462,163 @@ describe('Command Handlers', () => {
       expect(initialCommentNock.isDone()).toBe(true);
       expect(whatSpy).toHaveBeenCalledTimes(1);
       expect(reviewSpy).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('Review Comment Event via Probot', () => {
+    let currentApp;
+    let replySpy;
+
+    beforeEach(() => {
+      jest.resetModules();
+      currentApp = require('../index.js');
+      replySpy = jest.spyOn(currentApp, 'processReviewCommentReply').mockResolvedValue(undefined);
+    });
+
+    it('triggers reply when /review is used in a review comment', async () => {
+      const payload = JSON.parse(JSON.stringify(reviewCommentPayload));
+      payload.comment.body = '/review please';
+      payload.comment.id = 123;
+
+      const tokenNock = nock('https://api.github.com')
+        .post('/app/installations/2/access_tokens')
+        .reply(200, { token: 'test-token' });
+
+      const parentNock = nock('https://api.github.com')
+        .get('/repos/' + mockOwner + '/' + mockRepo + '/pulls/comments/5')
+        .reply(200, { id: 5, body: 'orig', diff_hunk: '@@' });
+
+      await currentApp.app.receive({ name: 'pull_request_review_comment', id: 'test-event-id', payload });
+
+      expect(tokenNock.isDone()).toBe(true);
+      expect(parentNock.isDone()).toBe(true);
+      expect(replySpy).toHaveBeenCalledWith(
+        expect.any(Object),
+        mockOwner,
+        mockRepo,
+        1,
+        expect.objectContaining({ id: 123 }),
+        expect.objectContaining({ id: 5 }),
+        'please'
+      );
+    });
+
+    it('handles /review with no extra text', async () => {
+      const payload = JSON.parse(JSON.stringify(reviewCommentPayload));
+      payload.comment.body = '/review';
+      payload.comment.id = 321;
+
+      const tokenNock = nock('https://api.github.com')
+        .post('/app/installations/2/access_tokens')
+        .reply(200, { token: 'test-token' });
+
+      const parentNock = nock('https://api.github.com')
+        .get('/repos/' + mockOwner + '/' + mockRepo + '/pulls/comments/5')
+        .reply(200, { id: 5, body: 'orig', diff_hunk: '@@' });
+
+      await currentApp.app.receive({ name: 'pull_request_review_comment', id: 'test-event-id', payload });
+
+      expect(tokenNock.isDone()).toBe(true);
+      expect(parentNock.isDone()).toBe(true);
+      expect(replySpy).toHaveBeenCalledWith(
+        expect.any(Object),
+        mockOwner,
+        mockRepo,
+        1,
+        expect.objectContaining({ id: 321 }),
+        expect.objectContaining({ id: 5 }),
+        ''
+      );
+    });
+
+    it('does not trigger on case mismatch', async () => {
+      const payload = JSON.parse(JSON.stringify(reviewCommentPayload));
+      payload.comment.body = '/Review please';
+
+      await currentApp.app.receive({ name: 'pull_request_review_comment', id: 'test-event-id', payload });
+
+      expect(replySpy).not.toHaveBeenCalled();
+    });
+
+    it('parses additional text with multiple commands', async () => {
+      const payload = JSON.parse(JSON.stringify(reviewCommentPayload));
+      payload.comment.body = '/review please /review again';
+      payload.comment.id = 456;
+
+      const tokenNock = nock('https://api.github.com')
+        .post('/app/installations/2/access_tokens')
+        .reply(200, { token: 'test-token' });
+
+      const parentNock = nock('https://api.github.com')
+        .get('/repos/' + mockOwner + '/' + mockRepo + '/pulls/comments/5')
+        .reply(200, { id: 5, body: 'orig', diff_hunk: '@@' });
+
+      await currentApp.app.receive({ name: 'pull_request_review_comment', id: 'test-event-id', payload });
+
+      expect(tokenNock.isDone()).toBe(true);
+      expect(parentNock.isDone()).toBe(true);
+      expect(replySpy).toHaveBeenCalledWith(
+        expect.any(Object),
+        mockOwner,
+        mockRepo,
+        1,
+        expect.objectContaining({ id: 456 }),
+        expect.objectContaining({ id: 5 }),
+        'please /review again'
+      );
+    });
+
+    it('handles errors when parent comment fetch fails', async () => {
+      const payload = JSON.parse(JSON.stringify(reviewCommentPayload));
+      payload.comment.body = '/review fail';
+
+      const tokenNock = nock('https://api.github.com')
+        .post('/app/installations/2/access_tokens')
+        .reply(200, { token: 'test-token' });
+
+      const parentNock = nock('https://api.github.com')
+        .get('/repos/' + mockOwner + '/' + mockRepo + '/pulls/comments/5')
+        .reply(500);
+
+      await currentApp.app.receive({ name: 'pull_request_review_comment', id: 'test-event-id', payload });
+
+      expect(tokenNock.isDone()).toBe(true);
+      expect(parentNock.isDone()).toBe(true);
+      expect(replySpy).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('processReviewCommentReply function', () => {
+    it('posts AI reply using parent comment id', async () => {
+      const mockOcto = { pulls: { createReplyForReviewComment: jest.fn().mockResolvedValue({}) } };
+      const comment = { id: 10, diff_hunk: '@@', path: 'file.js' };
+      const parent = { id: 5, body: 'hello', diff_hunk: '@@' };
+      await processReviewCommentReply(mockOcto, 'o', 'r', 1, comment, parent, 'hi');
+      expect(mockOcto.pulls.createReplyForReviewComment).toHaveBeenCalledWith(expect.objectContaining({
+        owner: 'o',
+        repo: 'r',
+        pull_number: 1,
+        comment_id: 5,
+        body: 'Mock AI response'
+      }));
+    });
+
+    it('sends error reply when posting fails', async () => {
+      const mockOcto = { pulls: { createReplyForReviewComment: jest.fn() } };
+      mockOcto.pulls.createReplyForReviewComment
+        .mockRejectedValueOnce(new Error('fail'))
+        .mockResolvedValueOnce({});
+      const comment = { id: 11, diff_hunk: '', path: '' };
+      const parent = { id: 6, body: '' };
+      await processReviewCommentReply(mockOcto, 'o', 'r', 2, comment, parent);
+      expect(mockOcto.pulls.createReplyForReviewComment).toHaveBeenCalledWith(expect.objectContaining({
+        comment_id: 6,
+        body: expect.stringContaining('Error processing review request')
+      }));
+    });
+
+    it('validates required parameters', async () => {
+      await expect(processReviewCommentReply(null, 'o', 'r', 1, {}, {})).rejects.toThrow('Missing required parameters');
     });
   });
 });

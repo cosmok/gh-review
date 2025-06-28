@@ -697,6 +697,42 @@ async function processReviewCommand(octokit, owner, repo, pr, files, dependencie
   }
 }
 
+async function processReviewCommentReply(octokit, owner, repo, prNumber, comment, parent, requestText = '') {
+  if (!octokit || !owner || !repo || !prNumber || !comment || !parent) {
+    throw new Error('Missing required parameters');
+  }
+  try {
+    const prompt = loadPrompt('comment_reply.md', {
+      comment: parent.body || '',
+      request: requestText || ''
+    });
+    const snippet = comment.diff_hunk || parent.diff_hunk || '';
+    const response = await analyzeWithAI(prompt, snippet, comment.path || '', parent.body || '');
+    if (response) {
+      await octokit.pulls.createReplyForReviewComment({
+        owner,
+        repo,
+        pull_number: prNumber,
+        comment_id: parent.id,
+        body: response.trim()
+      });
+    }
+  } catch (error) {
+    structuredLog('ERROR', 'Error in processReviewCommentReply', { error: error.message, stack: error.stack });
+    try {
+      await octokit.pulls.createReplyForReviewComment({
+        owner,
+        repo,
+        pull_number: prNumber,
+        comment_id: parent.id,
+        body: `❌ Error processing review request: ${error.message}`
+      });
+    } catch (replyError) {
+      structuredLog('ERROR', 'Failed to post error reply', { error: replyError.message });
+    }
+  }
+}
+
 async function getInstallationOctokit(context, repository) {
   const token = await context.octokit.apps.createInstallationAccessToken({
     installation_id: context.payload.installation.id,
@@ -769,6 +805,26 @@ function registerEventHandlers(probot, options = {}) {
     });
   }
 
+  probot.on('pull_request_review_comment.created', async (context) => {
+    const { comment, pull_request: pr, repository } = context.payload;
+    const { body, in_reply_to_id } = comment;
+    if (!body.startsWith(reviewKeyword) || !in_reply_to_id) return;
+    const repoOwner = repository.owner.login;
+    const repoName = repository.name;
+    const prNumber = pr.number;
+    const octokit = await getInstallationOctokit(context, repository);
+    let parent;
+    try {
+      const { data } = await octokit.pulls.getReviewComment({ owner: repoOwner, repo: repoName, comment_id: in_reply_to_id });
+      parent = data;
+    } catch (e) {
+      structuredLog('ERROR', 'Failed to fetch parent comment', { error: e.message, stack: e.stack });
+      return;
+    }
+    const userRequest = body.slice(reviewKeyword.length).trim();
+    await module.exports.processReviewCommentReply(octokit, repoOwner, repoName, prNumber, comment, parent, userRequest);
+  });
+
   if (enableLabel) {
     probot.on('pull_request.labeled', async (context) => {
       const { label, pull_request: pr, repository } = context.payload;
@@ -827,6 +883,7 @@ module.exports = {
   processFileDiff,
   processWhatCommand,
   processReviewCommand,
+  processReviewCommentReply,
   getFileContent,
   getChangedLineNumbers,
   expandLineNumbersToBlock,
