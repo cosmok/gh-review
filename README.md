@@ -1,5 +1,6 @@
 # AI-Powered GitHub PR Reviewer
 
+[![Run on Google Cloud](https://deploy.cloud.run/button.svg)](https://deploy.cloud.run)
 A GitHub App that uses Google's GenAI (Vertex AI) with Gemini to provide intelligent code reviews for pull requests. Requires **Node.js 18+**.
 
 ## Features

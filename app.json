@@ -1,0 +1,135 @@
+{
+  "name": "github-pr-reviewer",
+  "env": {
+    "APP_ID": {
+      "description": "GitHub App ID",
+      "value": "your_app_id"
+    },
+    "WEBHOOK_SECRET": {
+      "description": "GitHub webhook secret",
+      "value": "your_webhook_secret"
+    },
+    "PRIVATE_KEY": {
+      "description": "GitHub App private key. Recommended: Store in Google Secret Manager and provide the resource name, e.g., secretManager:project-id/secret-name/latest",
+      "value": "secretManager:your-project-id/github-private-key/latest"
+    },
+    "GOOGLE_CLOUD_PROJECT": {
+      "description": "Google Cloud project ID - used for LLM calls",
+      "value": "your-project-id"
+    },
+    "GOOGLE_CLOUD_LOCATION": {
+      "description": "Google Cloud region - for LLM API",
+      "value": "your-region"
+    },
+    "GOOGLE_APPLICATION_CREDENTIALS": {
+      "description": "Path to service account key JSON (for local development). Not required for Cloud Run when using an attached service account.",
+      "value": "",
+      "required": false
+    },
+    "OPENAI_API_KEY": {
+      "description": "OpenAI API key",
+      "value": "your-openai-api-key",
+      "required": false
+    },
+    "ANTHROPIC_API_KEY": {
+      "description": "Anthropic API key",
+      "value": "your-anthropic-api-key",
+      "required": false
+    },
+    "LLM_PROVIDER": {
+      "description": "AI provider (google, openai, anthropic)",
+      "value": "google"
+    },
+    "GENAI_MODEL": {
+      "description": "Gemini model name",
+      "value": "gemini-2.5-flash-preview-05-20",
+      "required": false
+    },
+    "OPENAI_MODEL": {
+      "description": "OpenAI model name",
+      "value": "gpt-3.5-turbo",
+      "required": false
+    },
+    "ANTHROPIC_MODEL": {
+      "description": "Anthropic model name",
+      "value": "claude-3-sonnet-20240229",
+      "required": false
+    },
+    "LLM_MAX_TOKENS": {
+      "description": "Max tokens for responses",
+      "value": "1024"
+    },
+    "LLM_TEMPERATURE": {
+      "description": "LLM temperature",
+      "value": "0.2"
+    },
+    "LLM_TOP_P": {
+      "description": "LLM top_p",
+      "value": "0.8"
+    },
+    "LLM_TOP_K": {
+      "description": "LLM top_k",
+      "value": "40"
+    },
+    "MAX_FILES_TO_PROCESS": {
+      "description": "Max files per review",
+      "value": "20"
+    },
+    "MAX_DIFF_LENGTH": {
+      "description": "Max diff length",
+      "value": "8000"
+    },
+    "MAX_DIFF_LINES": {
+      "description": "Max diff lines",
+      "value": "500"
+    },
+    "MAX_FILE_SIZE": {
+      "description": "Max file size",
+      "value": "100000"
+    },
+    "MAX_CONTEXT_LINES": {
+      "description": "Max context lines",
+      "value": "200"
+    },
+    "REQUEST_TIMEOUT": {
+      "description": "Request timeout ms",
+      "value": "30000"
+    },
+    "CONCURRENCY_LIMIT": {
+      "description": "Concurrency limit",
+      "value": "3"
+    },
+    "PORT": {
+      "description": "Application port",
+      "value": "3000"
+    },
+    "ENABLE_ISSUE_COMMENT_EVENT": {
+      "description": "Respond to issue comments",
+      "value": "true"
+    },
+    "ENABLE_LABEL_EVENT": {
+      "description": "Respond to label events",
+      "value": "false"
+    },
+    "TRIGGER_LABEL": {
+      "description": "Label to trigger review",
+      "value": "ai-review"
+    },
+    "REVIEW_COMMENT_KEYWORD": {
+      "description": "Keyword to trigger review",
+      "value": "/review"
+    },
+    "SUMMARY_COMMENT_KEYWORD": {
+      "description": "Keyword for summary only",
+      "value": "/what"
+    },
+    "ENABLE_REPO_INSTRUCTIONS": {
+      "description": "Enable repo instructions",
+      "value": "false"
+    },
+    "INSTRUCTION_FILENAME": {
+      "description": "Instruction file name",
+      "value": "AI_REVIEW_INSTRUCTIONS.md"
+    }
+  }
+}
