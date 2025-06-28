@@ -10,20 +10,20 @@
       "value": "your_webhook_secret"
     },
     "PRIVATE_KEY": {
-      "description": "GitHub App private key",
-      "value": "-----BEGIN RSA PRIVATE KEY-----\\nYour private key here\\n-----END RSA PRIVATE KEY-----"
+      "description": "GitHub App private key. Recommended: Store in Google Secret Manager and provide the resource name, e.g., secretManager:project-id/secret-name/latest",
+      "value": "secretManager:your-project-id/github-private-key/latest"
     },
     "GOOGLE_CLOUD_PROJECT": {
-      "description": "Google Cloud project ID",
+      "description": "Google Cloud project ID - used for LLM calls",
       "value": "your-project-id"
     },
     "GOOGLE_CLOUD_LOCATION": {
-      "description": "Google Cloud region",
+      "description": "Google Cloud region - for LLM API",
       "value": "your-region"
     },
     "GOOGLE_APPLICATION_CREDENTIALS": {
-      "description": "Path to service account key JSON",
-      "value": "path/to/your/service-account-key.json",
+      "description": "Path to service account key JSON (for local development). Not required for Cloud Run when using an attached service account.",
+      "value": "",
       "required": false
     },
     "OPENAI_API_KEY": {
