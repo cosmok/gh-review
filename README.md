@@ -70,7 +70,7 @@ To customise the review behaviour for a repository, add a file named `AI_REVIEW_
      - `REVIEW_COMMENT_KEYWORD` (default `/review`)
      - `SUMMARY_COMMENT_KEYWORD` (default `/what`)
    - (Optional) Customize instructions with:
-     - `ENABLE_REPO_INSTRUCTIONS` (`true` by default)
+     - `ENABLE_REPO_INSTRUCTIONS` (`false` by default)
      - `INSTRUCTION_FILENAME` (file name containing instructions, default `AI_REVIEW_INSTRUCTIONS.md`)
 
 3. **Install Dependencies**
