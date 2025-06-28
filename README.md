@@ -49,6 +49,7 @@ To customise the review behaviour for a repository, add a file named `AI_REVIEW_
    - Fill in the values from your GitHub App settings
    - Set `APP_ID`, `PRIVATE_KEY`, and `WEBHOOK_SECRET` with the credentials from the app you created
    - For the private key, copy the contents of the downloaded `.pem` file and format it as a single line with `\n` for newlines
+   - Set Google Cloud details with `GOOGLE_CLOUD_PROJECT` and `GOOGLE_CLOUD_LOCATION` (and optionally `GOOGLE_APPLICATION_CREDENTIALS`)
    - (Optional) Choose an AI provider with `LLM_PROVIDER` (`google`, `openai`, `anthropic`)
    - (Optional) Set `GENAI_MODEL`, `OPENAI_MODEL`, or `ANTHROPIC_MODEL` to override defaults
   - Provide API keys with `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` when using the
@@ -60,12 +61,17 @@ To customise the review behaviour for a repository, add a file named `AI_REVIEW_
      - `MAX_FILES_TO_PROCESS` (default 20)
      - `MAX_DIFF_LENGTH`, `MAX_DIFF_LINES`, `MAX_FILE_SIZE`, and
        `MAX_CONTEXT_LINES`
+     - `CONCURRENCY_LIMIT` (default 3)
+     - `REQUEST_TIMEOUT` in milliseconds (default 30000)
    - (Optional) Control event triggers with:
      - `ENABLE_ISSUE_COMMENT_EVENT` (`true` by default)
      - `ENABLE_LABEL_EVENT` (`false` by default)
      - `TRIGGER_LABEL` (label name to trigger review, default `ai-review`)
      - `REVIEW_COMMENT_KEYWORD` (default `/review`)
      - `SUMMARY_COMMENT_KEYWORD` (default `/what`)
+   - (Optional) Customize instructions with:
+     - `ENABLE_REPO_INSTRUCTIONS` (`true` by default)
+     - `INSTRUCTION_FILENAME` (file name containing instructions, default `AI_REVIEW_INSTRUCTIONS.md`)
 
 3. **Install Dependencies**
    ```bash
