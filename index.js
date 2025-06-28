@@ -283,6 +283,33 @@ async function getRepoInstructions(octokit, owner, repo, filePath, ref) {
   return '';
 }
 
+function summarizePackageJsonChanges(baseContent, headContent) {
+  try {
+    const basePkg = JSON.parse(baseContent || '{}');
+    const headPkg = JSON.parse(headContent || '{}');
+    const sections = ['dependencies', 'devDependencies'];
+    const lines = [];
+    for (const section of sections) {
+      const baseDeps = basePkg[section] || {};
+      const headDeps = headPkg[section] || {};
+      const added = Object.keys(headDeps).filter(k => !(k in baseDeps));
+      const removed = Object.keys(baseDeps).filter(k => !(k in headDeps));
+      const updated = Object.keys(headDeps)
+        .filter(k => baseDeps[k] && headDeps[k] !== baseDeps[k])
+        .map(k => `${k} (${baseDeps[k]} -> ${headDeps[k]})`);
+      if (added.length)
+        lines.push(`Added ${section}: ${added.map(a => `${a}@${headDeps[a]}`).join(', ')}`);
+      if (removed.length)
+        lines.push(`Removed ${section}: ${removed.map(r => `${r}@${baseDeps[r]}`).join(', ')}`);
+      if (updated.length)
+        lines.push(`Updated ${section}: ${updated.join(', ')}`);
+    }
+    return lines.join('\n');
+  } catch (e) {
+    return '';
+  }
+}
+
 function getChangedLineNumbers(diff) {
   if (!diff) return { headLines: [], baseLines: [] };
   const headLines = [];
@@ -435,10 +462,18 @@ async function processFileDiff(octokit, owner, repo, file, pr) {
       fileInfo.context = `## New File: ${file.filename}\n\nFile content (truncated if large):\n\`\`\`\n${content}\n\`\`\``;
       fileInfo.changedLines = getChangedLineNumbers(diff).headLines;
       fileInfo.headContent = content;
+      if (file.filename.endsWith('package.json')) {
+        const pkgSummary = summarizePackageJsonChanges('', content);
+        if (pkgSummary) fileInfo.context += `\n\n### Dependency Changes\n${pkgSummary}`;
+      }
     } else if (file.status === 'removed') {
       fileInfo.diff = diff.length > MAX_DIFF_LENGTH ? diff.substring(0, MAX_DIFF_LENGTH) + '\n[...truncated...]' : diff;
       const content = await getFileContent(octokit, owner, repo, file.filename, pr.base.sha, { startLine: 1, endLine: 100, contextLines: 0 });
       fileInfo.context = `## Deleted File: ${file.filename}\n\nOriginal file content (first 100 lines):\n\`\`\`\n${content}\n\`\`\``;
+      if (file.filename.endsWith('package.json')) {
+        const pkgSummary = summarizePackageJsonChanges(content, '');
+        if (pkgSummary) fileInfo.context += `\n\n### Dependency Changes\n${pkgSummary}`;
+      }
     } else if (file.status === 'modified' || file.status === 'renamed') {
       const { headLines, baseLines } = getChangedLineNumbers(diff);
       const baseContent = await getFileContent(octokit, owner, repo, file.filename, pr.base.sha);
@@ -451,6 +486,10 @@ async function processFileDiff(octokit, owner, repo, file, pr) {
       fileInfo.diff = generateContextDiff(baseContent, headContent, expandedBase, expandedHead, file.filename);
       if (fileInfo.diff.length > MAX_DIFF_LENGTH) {
         fileInfo.diff = fileInfo.diff.substring(0, MAX_DIFF_LENGTH) + '\n[...truncated...]';
+      }
+      if (file.filename.endsWith('package.json')) {
+        const pkgSummary = summarizePackageJsonChanges(baseContent, headContent);
+        if (pkgSummary) fileInfo.context += `\n\n### Dependency Changes\n${pkgSummary}`;
       }
     }
     if (pr.body) fileInfo.context += `\n\n### PR Description/Context:\n> ${pr.body.replace(/\n/g, '\n> ')}`;
@@ -779,6 +818,7 @@ module.exports = {
   truncateToLines,
   removeLeadingMarkdownHeading,
   linkLineNumbers,
+  summarizePackageJsonChanges,
   getRepoInstructions,
   constants: {
     MAX_FILE_SIZE,
