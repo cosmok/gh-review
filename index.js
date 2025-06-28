@@ -267,20 +267,40 @@ async function getCommitMessages(octokit, owner, repo, prNumber) {
 
 async function getRepoInstructions(octokit, owner, repo, filePath, ref) {
   if (!ENABLE_REPO_INSTRUCTIONS) return '';
+
+  // Always attempt to load repo-level instructions first
+  let repoLevel = '';
+  try {
+    const rootContent = await getFileContent(octokit, owner, repo, INSTRUCTION_FILENAME, ref);
+    if (rootContent && !rootContent.startsWith('[File not found')) repoLevel = rootContent;
+  } catch (e) {
+    if (e.status !== 404) {
+      structuredLog('ERROR', 'Error reading repo instructions', { path: INSTRUCTION_FILENAME, error: e.message });
+    }
+  }
+
+  // Then look for the closest folder-level instructions (excluding repo root)
+  let folderLevel = '';
   const parts = path.posix.dirname(filePath).split('/');
-  for (let i = parts.length; i >= 0; i--) {
+  for (let i = parts.length; i > 0; i--) {
     const dir = parts.slice(0, i).join('/');
-    const searchPath = path.posix.join(dir || '', INSTRUCTION_FILENAME);
+    const searchPath = path.posix.join(dir, INSTRUCTION_FILENAME);
+    if (searchPath === INSTRUCTION_FILENAME) continue; // skip repo root handled above
     try {
       const content = await getFileContent(octokit, owner, repo, searchPath, ref);
-      if (content && !content.startsWith('[File not found')) return content;
+      if (content && !content.startsWith('[File not found')) { folderLevel = content; break; }
     } catch (e) {
       if (e.status !== 404) {
         structuredLog('ERROR', 'Error reading repo instructions', { path: searchPath, error: e.message });
       }
     }
   }
-  return '';
+
+  if (repoLevel && folderLevel) {
+    if (repoLevel.trim() === folderLevel.trim()) return repoLevel;
+    return `${folderLevel}\n\n${repoLevel}`;
+  }
+  return folderLevel || repoLevel || '';
 }
 
 function summarizePackageJsonChanges(baseContent, headContent) {
