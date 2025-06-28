@@ -276,13 +276,14 @@ async function getRepoInstructions(octokit, owner, repo, filePath, ref) {
     }
   }
 
-  // Then look for the closest folder-level instructions (excluding repo root)
+  // Then look for the closest folder-level instructions, walking up the tree
+  // from the file's directory until (but excluding) the repo root
   let folderLevel = '';
   const parts = path.posix.dirname(filePath).split('/');
-  for (let i = parts.length; i >= 0; i--) {
+  for (let i = parts.length; i > 0; i--) {
     const dir = parts.slice(0, i).join('/');
     const searchPath = path.posix.join(dir, INSTRUCTION_FILENAME);
-    if (searchPath === INSTRUCTION_FILENAME || dir === '' || dir === '.') continue; // skip repo root handled above
+    if (searchPath === INSTRUCTION_FILENAME) continue; // skip repo root handled above
     try {
       const content = await getFileContent(octokit, owner, repo, searchPath, ref);
       if (content && !content.startsWith('[File not found')) { folderLevel = content; break; }
