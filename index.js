@@ -77,9 +77,6 @@ try {
 }
 
 
-// Default model for Google provider (others use their own defaults)
-const defaultModel = process.env.GENAI_MODEL || 'gemini-2.5-flash-preview-05-20';
-
 // --- Helper functions (analyzeWithAI, truncateToLines, etc.) remain in module scope ---
 async function analyzeWithAI(prompt, codeSnippet, filePath, context = '') {
   const controller = new AbortController();
@@ -88,7 +85,7 @@ async function analyzeWithAI(prompt, codeSnippet, filePath, context = '') {
     const truncatedSnippet = truncateToLines(codeSnippet, MAX_DIFF_LINES);
     const truncatedContext = context ? truncateToLines(context, MAX_CONTEXT_LINES) : '';
     const message = `# Code Review Task: ${filePath}\n\n## Context\n${truncatedContext || 'No additional context provided.'}\n\n## Changes\n\`\`\`diff\n${truncatedSnippet}\n\`\`\`\n\n## Instructions\n${prompt}\n\n## Guidelines\n- Be specific and reference line numbers from the diff\n- Only report issues you're certain about\n- Suggest concrete improvements when possible`;
-    const resultText = await llmClient.generate(message, { model: defaultModel });
+    const resultText = await llmClient.generate(message, { });
     clearTimeout(timeoutId);
     return resultText;
   } catch (error) {
