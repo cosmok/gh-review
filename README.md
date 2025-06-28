@@ -51,8 +51,11 @@ To customise the review behaviour for a repository, add a file named `AI_REVIEW_
    - For the private key, copy the contents of the downloaded `.pem` file and format it as a single line with `\n` for newlines
    - (Optional) Choose an AI provider with `LLM_PROVIDER` (`google`, `openai`, `anthropic`)
    - (Optional) Set `GENAI_MODEL`, `OPENAI_MODEL`, or `ANTHROPIC_MODEL` to override defaults
-   - (Optional) Provide provider API keys with `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`
-   - (Optional) Set `PORT` for local testing (default `3000`)
+  - Provide API keys with `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` when using the
+    corresponding provider
+  - (Optional) Configure generation with `LLM_MAX_TOKENS`, `LLM_TEMPERATURE`,
+    `LLM_TOP_P`, and `LLM_TOP_K`
+  - (Optional) Set `PORT` for local testing (default `3000`)
    - (Optional) Tune limits with:
      - `MAX_FILES_TO_PROCESS` (default 20)
      - `MAX_DIFF_LENGTH`, `MAX_DIFF_LINES`, `MAX_FILE_SIZE`, and

@@ -7,6 +7,12 @@ process.env.WEBHOOK_SECRET = 'test-secret';
 process.env.GOOGLE_CLOUD_PROJECT = 'test-project';
 process.env.GOOGLE_CLOUD_LOCATION = 'us-central1';
 process.env.GOOGLE_APPLICATION_CREDENTIALS = 'test-credentials.json';
+process.env.OPENAI_API_KEY = 'openai-key';
+process.env.ANTHROPIC_API_KEY = 'anthropic-key';
+process.env.LLM_MAX_TOKENS = '1024';
+process.env.LLM_TEMPERATURE = '0.2';
+process.env.LLM_TOP_P = '0.8';
+process.env.LLM_TOP_K = '40';
 process.env.ENABLE_REPO_INSTRUCTIONS = 'false';
 
 // Mock console methods to keep test output clean
