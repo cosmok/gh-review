@@ -28,6 +28,20 @@ const prLabeledPayload = {
   label: { name: 'ai-review' },
 };
 
+const reviewCommentPayload = {
+  action: 'created',
+  pull_request: { number: 1 },
+  repository: { name: 'test-repo', owner: { login: 'test-owner' }, full_name: 'test-owner/test-repo' },
+  installation: { id: 2 },
+  comment: {
+    id: 10,
+    body: '',
+    in_reply_to_id: 5,
+    path: 'file.js',
+    diff_hunk: '@@ line @@\n+code'
+  }
+};
+
 describe('Command Handlers', () => {
   let mockOctokit;
 
@@ -447,6 +461,45 @@ describe('Command Handlers', () => {
       expect(initialCommentNock.isDone()).toBe(true);
       expect(whatSpy).toHaveBeenCalledTimes(1);
       expect(reviewSpy).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('Review Comment Event via Probot', () => {
+    let currentApp;
+    let replySpy;
+
+    beforeEach(() => {
+      jest.resetModules();
+      currentApp = require('../index.js');
+      replySpy = jest.spyOn(currentApp, 'processReviewCommentReply').mockResolvedValue(undefined);
+    });
+
+    it('triggers reply when /review is used in a review comment', async () => {
+      const payload = JSON.parse(JSON.stringify(reviewCommentPayload));
+      payload.comment.body = '/review please';
+      payload.comment.id = 123;
+
+      const tokenNock = nock('https://api.github.com')
+        .post('/app/installations/2/access_tokens')
+        .reply(200, { token: 'test-token' });
+
+      const parentNock = nock('https://api.github.com')
+        .get('/repos/' + mockOwner + '/' + mockRepo + '/pulls/comments/5')
+        .reply(200, { id: 5, body: 'orig', diff_hunk: '@@' });
+
+      await currentApp.app.receive({ name: 'pull_request_review_comment', id: 'test-event-id', payload });
+
+      expect(tokenNock.isDone()).toBe(true);
+      expect(parentNock.isDone()).toBe(true);
+      expect(replySpy).toHaveBeenCalledWith(
+        expect.any(Object),
+        mockOwner,
+        mockRepo,
+        1,
+        expect.objectContaining({ id: 123 }),
+        expect.objectContaining({ id: 5 }),
+        'please'
+      );
     });
   });
 });
