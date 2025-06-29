@@ -2,11 +2,11 @@
 
 [![Run on Google Cloud](https://deploy.cloud.run/button.svg)](https://deploy.cloud.run)
 
-A GitHub App that uses Google's GenAI (Vertex AI) with Gemini to provide intelligent code reviews for pull requests. Requires **Node.js 18+**.
+A GitHub App that uses generative AI models like Gemini, GPT, and Claude to provide intelligent code reviews for pull requests. Requires **Node.js 18+**.
 
 ## Features
 
-- **AI-Powered Code Review**: Uses Google's GenAI with Gemini to analyze code
+- **AI-Powered Code Review**: Analyze code using your choice of Gemini, GPT, or Claude models
 - **Commands**:
   - `/review`: Generates a PR summary and performs a deep code review
   - `/what`: (optional) Only produce the summary of changes
@@ -22,7 +22,7 @@ A GitHub App that uses Google's GenAI (Vertex AI) with Gemini to provide intelli
 
 ## Review Workflow
 
-All prompts used for AI analysis live under the `prompts/` directory. The app loads these templates at runtime and fills in variables such as the file name or manager instructions before sending them to Gemini. Editing the text files allows you to tweak the review style without changing code.
+All prompts used for AI analysis live under the `prompts/` directory. The app loads these templates at runtime and fills in variables such as the file name or manager instructions before sending them to the configured model. Editing the text files allows you to tweak the review style without changing code.
 
 To customise the review behaviour for a repository, add a file named `AI_REVIEW_INSTRUCTIONS.md` to the repository root or within any folder. The contents of the closest instructions file are inserted into the review prompts for files in that directory. See `AI_REVIEW_INSTRUCTIONS_TEMPLATE.md` for an example template.
 
