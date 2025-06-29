@@ -49,7 +49,9 @@ To customise the review behaviour for a repository, add a file named `AI_REVIEW_
    - Deploy your `gh-review` service and update the GitHub App's webhook URL
    - Use the generated webhook secret and credentials in your `.env` file
 
-2. **Configure Environment Variables**
+## Deployment
+
+### Configure Environment Variables
    - Copy `.env.example` to `.env`
    - Fill in the values from your GitHub App settings
    - Set `APP_ID`, `PRIVATE_KEY`, and `WEBHOOK_SECRET` with the credentials from the app you created
@@ -78,20 +80,19 @@ To customise the review behaviour for a repository, add a file named `AI_REVIEW_
      - `ENABLE_REPO_INSTRUCTIONS` (`false` by default)
      - `INSTRUCTION_FILENAME` (file name containing instructions, default `AI_REVIEW_INSTRUCTIONS.md`)
 
-3. **Install Dependencies**
-   ```bash
-   npm install
-   ```
+### Deploy to Cloud Run
 
-4. **Run the App**
-   ```bash
-   npm start
-   ```
+Run:
+```bash
+gcloud run deploy github-pr-reviewer --source . --region australia-southeast1
+```
+Ensure the container executes `npm start`.
+Set the environment variables above in your Cloud Run configuration.
 
-   For development with auto-reload:
-   ```bash
-   npm run dev
-   ```
+Local execution is mainly for running tests:
+```bash
+npm test
+```
 
 ## Security
 
@@ -103,28 +104,12 @@ calls are properly authenticated and scoped to your repository.
 ## Development
 
 - The main application logic is in `index.js`
-- The app listens for `pull_request.opened` events
+- The app listens for GitHub webhook events:
+  - `issue_comment.created`
+  - `pull_request_review_comment.created`
+  - `pull_request.labeled`
+  - `installation.created`
 - Reviews are submitted using the GitHub API
-
-## Deployment
-
-You can deploy this app to any Node.js hosting platform like:
-- Heroku
-- Vercel
-- AWS Lambda
-- Google Cloud Run
-
-### Google Cloud Run
-
-1. Build and deploy your container image as you normally would.
-2. Ensure the container executes `npm start` (which runs `node index.js`).
-3. Alternatively, you can use the `gcloud run deploy` command to deploy the app
-   from the command line.
-   ```bash
-   gcloud run deploy github-pr-reviewer --source . --region australia-southeast1
-   ```
-
-Make sure to set the environment variables in your hosting platform's configuration.
 
 
 ## License
