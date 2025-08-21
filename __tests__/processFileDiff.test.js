@@ -219,4 +219,43 @@ function test() {
     expect(result.context).toContain('Head');
     expect(result.context).toContain('Base');
   });
+
+  it('preserves original line numbers in generated diff', async () => {
+    const lines = Array.from({ length: 120 }, (_, i) => `line${i + 1}`);
+    const baseContent = lines.join('\n');
+    const headLines = [...lines];
+    headLines[79] = 'updated line 80';
+    const headContent = headLines.join('\n');
+    const patch = require('diff').createTwoFilesPatch(
+      'bigfile.js',
+      'bigfile.js',
+      baseContent,
+      headContent,
+      '',
+      '',
+      { context: 10 }
+    );
+
+    const mockFile = {
+      filename: 'bigfile.js',
+      status: 'modified',
+      changes: 2,
+      additions: 1,
+      deletions: 1,
+      patch
+    };
+
+    nock('https://api.github.com')
+      .get(`/repos/${mockOwner}/${mockRepo}/contents/${encodeURIComponent(mockFile.filename)}`)
+      .query(q => q.ref === 'base-sha')
+      .reply(200, { content: Buffer.from(baseContent).toString('base64'), size: baseContent.length });
+
+    nock('https://api.github.com')
+      .get(`/repos/${mockOwner}/${mockRepo}/contents/${encodeURIComponent(mockFile.filename)}`)
+      .query(q => q.ref === 'head-sha')
+      .reply(200, { content: Buffer.from(headContent).toString('base64'), size: headContent.length });
+
+    const result = await processFileDiff(octokit, mockOwner, mockRepo, mockFile, mockPr);
+    expect(result.diff).toContain('@@ -70,21 +70,21 @@');
+  });
 });
