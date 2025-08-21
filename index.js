@@ -153,7 +153,8 @@ function truncateToLines(text, maxLines) {
 
 function removeLeadingMarkdownHeading(text) {
   if (!text) return '';
-  return text.replace(/^\s*#{1,6}\s.*\n+/, '');
+  const noHeading = text.replace(/^\s*#{1,6}\s.*\n+/, '');
+  return noHeading.split('\n').map(line => line.trimStart()).join('\n');
 }
 
 function diffAnchor(file) {
