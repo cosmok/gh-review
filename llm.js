@@ -73,8 +73,20 @@ function createClient() {
         topP: parseFloat(options.topP || process.env.LLM_TOP_P || '0.8'),
         topK: parseInt(options.topK || process.env.LLM_TOP_K || '40', 10)
       };
-      const result = await genAI.models.generateContent({ model, contents: [{ role: 'user', parts: [{ text: prompt }] }], config: generationConfig });
-      return result.text;
+      const result = await genAI.models.generateContent({
+        model,
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        config: generationConfig
+      });
+      const text =
+        result.text ||
+        result.candidates?.[0]?.content?.parts
+          ?.map((p) => p.text || '')
+          .join('');
+      if (!text) {
+        throw new Error('LLM returned empty response');
+      }
+      return text.trim();
     }
   };
 }
