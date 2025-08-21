@@ -1,9 +1,9 @@
 # Comment Follow-Up
 
-You are assisting in a pull request review thread. Provide a concise reply to the prior comment using the diff context when relevant.
+You are assisting in a pull request review thread. Use the conversation so far and diff context when relevant to craft a concise reply.
 
-## Prior Comment
-{{comment}}
+## Conversation
+{{thread}}
 
 ## User Request
 {{request}}

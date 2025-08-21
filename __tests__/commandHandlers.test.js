@@ -7,7 +7,8 @@ const {
   processWhatCommand,
   processFileDiff,
   analyzeWithAI,
-  processReviewCommentReply
+  processReviewCommentReply,
+  processAskCommand
 } = appModule;
 
 // privateKey is now solely set in __tests__/setup.js via process.env.PRIVATE_KEY
@@ -619,11 +620,40 @@ describe('Command Handlers', () => {
       expect(parentNock.isDone()).toBe(true);
       expect(replySpy).not.toHaveBeenCalled();
     });
+
+    it('responds to /ask on a top-level review comment', async () => {
+      const payload = JSON.parse(JSON.stringify(reviewCommentPayload));
+      payload.comment.body = '/ask what?';
+      payload.comment.id = 777;
+      delete payload.comment.in_reply_to_id;
+
+      const tokenNock = nock('https://api.github.com')
+        .post('/app/installations/2/access_tokens')
+        .reply(200, { token: 'test-token' });
+
+      await currentApp.app.receive({ name: 'pull_request_review_comment', id: 'test-event-id', payload });
+
+      expect(tokenNock.isDone()).toBe(true);
+      expect(replySpy).toHaveBeenCalledWith(
+        expect.any(Object),
+        mockOwner,
+        mockRepo,
+        1,
+        expect.objectContaining({ id: 777 }),
+        expect.objectContaining({ id: 777 }),
+        'what?'
+      );
+    });
   });
 
   describe('processReviewCommentReply function', () => {
     it('posts AI reply using parent comment id', async () => {
-      const mockOcto = { pulls: { createReplyForReviewComment: jest.fn().mockResolvedValue({}) } };
+      const mockOcto = {
+        pulls: {
+          createReplyForReviewComment: jest.fn().mockResolvedValue({}),
+          listReviewComments: jest.fn().mockResolvedValue({ data: [] })
+        }
+      };
       const comment = { id: 10, diff_hunk: '@@', path: 'file.js' };
       const parent = { id: 5, body: 'hello', diff_hunk: '@@' };
       await processReviewCommentReply(mockOcto, 'o', 'r', 1, comment, parent, 'hi');
@@ -637,7 +667,7 @@ describe('Command Handlers', () => {
     });
 
     it('sends error reply when posting fails', async () => {
-      const mockOcto = { pulls: { createReplyForReviewComment: jest.fn() } };
+      const mockOcto = { pulls: { createReplyForReviewComment: jest.fn(), listReviewComments: jest.fn().mockResolvedValue({ data: [] }) } };
       mockOcto.pulls.createReplyForReviewComment
         .mockRejectedValueOnce(new Error('fail'))
         .mockResolvedValueOnce({});
@@ -652,6 +682,42 @@ describe('Command Handlers', () => {
 
     it('validates required parameters', async () => {
       await expect(processReviewCommentReply(null, 'o', 'r', 1, {}, {})).rejects.toThrow('Missing required parameters');
+    });
+    it('includes thread context when generating reply', async () => {
+      const threadComments = [
+        { id: 5, body: 'root', user: { login: 'alice' } },
+        { id: 6, body: 'first reply', in_reply_to_id: 5, user: { login: 'bob' } },
+        { id: 10, body: '/ask second?', in_reply_to_id: 5, user: { login: 'carol' } }
+      ];
+      const mockOcto = {
+        pulls: {
+          createReplyForReviewComment: jest.fn().mockResolvedValue({}),
+          listReviewComments: jest.fn().mockResolvedValue({ data: threadComments })
+        }
+      };
+      const comment = { id: 10, diff_hunk: '', path: 'f.js' };
+      const parent = { id: 5, body: 'root', diff_hunk: '', path: 'f.js' };
+      await processReviewCommentReply(mockOcto, 'o', 'r', 1, comment, parent, 'second?');
+      expect(mockOcto.pulls.listReviewComments).toHaveBeenCalledWith(expect.objectContaining({ owner: 'o', repo: 'r', pull_number: 1, per_page: 100 }));
+      expect(mockOcto.pulls.createReplyForReviewComment).toHaveBeenCalled();
+    });
+  });
+
+  describe('processAskCommand function', () => {
+    it('posts answer to question', async () => {
+      const mockOcto = {
+        pulls: {
+          get: jest.fn().mockResolvedValue({ data: { diff: 'diff data' } }),
+          listCommits: jest.fn().mockResolvedValue({ data: [ { commit: { message: 'cm' } } ] })
+        },
+        issues: { createComment: jest.fn().mockResolvedValue({}) }
+      };
+      const analyze = jest.fn().mockResolvedValue('answer');
+      const pr = { number: 1 };
+      await processAskCommand(mockOcto, 'o', 'r', pr, [], 'why?', { analyzeWithAIDep: analyze, thread: 'alice: hi' });
+      expect(analyze).toHaveBeenCalledWith(expect.any(String), 'diff data', 'PR Question', expect.stringContaining('alice: hi'));
+      expect(analyze).toHaveBeenCalledWith(expect.any(String), 'diff data', 'PR Question', expect.stringContaining('cm'));
+      expect(mockOcto.issues.createComment).toHaveBeenCalledWith(expect.objectContaining({ body: 'answer' }));
     });
   });
 });

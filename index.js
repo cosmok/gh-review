@@ -647,6 +647,39 @@ async function processWhatCommand(octokit, owner, repo, pr, files, dependencies 
   }
 }
 
+async function processAskCommand(octokit, owner, repo, pr, files, question, dependencies = {}) {
+  const {
+    analyzeWithAIDep = analyzeWithAI,
+    logContext = {},
+    thread = ''
+  } = dependencies;
+  structuredLog('INFO', 'Question processing started', { requestId: logContext.requestId, pr: pr.number, repo: `${owner}/${repo}` });
+  let diff = '';
+  try {
+    const { data } = await octokit.pulls.get({ owner, repo, pull_number: pr.number, mediaType: { format: 'diff' } });
+    diff = typeof data === 'string' ? data : data.diff;
+  } catch (error) {
+    structuredLog('ERROR', 'Error getting PR diff', { error: error.message, stack: error.stack });
+  }
+  const commitMessages = await getCommitMessages(octokit, owner, repo, pr.number);
+  const contextParts = [];
+  if (thread) contextParts.push(`Conversation:\n${thread}`);
+  if (commitMessages) contextParts.push(`Commits:\n${commitMessages}`);
+  const context = contextParts.join('\n\n');
+  const prompt = loadPrompt('ask_question.md', { question });
+  try {
+    const answer = await analyzeWithAIDep(prompt, diff, 'PR Question', context);
+    if (answer) {
+      await octokit.issues.createComment({ owner, repo, issue_number: pr.number, body: removeLeadingMarkdownHeading(answer) });
+    } else {
+      await octokit.issues.createComment({ owner, repo, issue_number: pr.number, body: '❌ No answer generated.' });
+    }
+  } catch (e) {
+    structuredLog('ERROR', 'Question analysis failed', { error: e.message, requestId: logContext.requestId });
+    await octokit.issues.createComment({ owner, repo, issue_number: pr.number, body: `❌ Error answering question: ${e.message}` });
+  }
+}
+
 async function processReviewCommand(octokit, owner, repo, pr, files, dependencies = {}, summary = '') {
   const startTime = Date.now();
   const {
@@ -834,13 +867,27 @@ async function processReviewCommentReply(octokit, owner, repo, prNumber, comment
   }
   const requestId = logContext.requestId || comment.__requestId;
   try {
+    let threadText = '';
+    try {
+      const { data: all } = await octokit.pulls.listReviewComments({ owner, repo, pull_number: prNumber, per_page: 100 });
+      const threadComments = all
+        .filter(c => c.id === parent.id || c.in_reply_to_id === parent.id)
+        .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
+        .filter(c => c.id !== comment.id);
+      threadText = threadComments
+        .map(c => `${c.user?.login || 'unknown'}: ${c.body}`)
+        .join('\n');
+    } catch (e) {
+      structuredLog('WARN', 'Failed to fetch thread comments', { error: e.message, requestId });
+      threadText = parent.body || '';
+    }
     const prompt = loadPrompt('comment_reply.md', {
-      comment: parent.body || '',
+      thread: threadText,
       request: requestText || ''
     });
     structuredLog('INFO', 'Reply generation started', { requestId, pr: prNumber });
     const snippet = comment.diff_hunk || parent.diff_hunk || '';
-    const response = await analyzeWithAI(prompt, snippet, comment.path || '', parent.body || '');
+    const response = await analyzeWithAI(prompt, snippet, comment.path || '', threadText);
     if (response) {
       await octokit.pulls.createReplyForReviewComment({
         owner,
@@ -925,27 +972,50 @@ function registerEventHandlers(probot, options = {}) {
     reviewLabel = process.env.TRIGGER_LABEL || 'ai-review',
     reviewKeyword = process.env.REVIEW_COMMENT_KEYWORD || '/review',
     summaryKeyword = process.env.SUMMARY_COMMENT_KEYWORD || '/what',
+    askKeyword = process.env.ASK_COMMENT_KEYWORD || '/ask',
   } = options;
 
   if (enableIssueComment) {
     probot.on('issue_comment.created', async (context) => {
       const { comment, issue, repository } = context.payload;
       const { body } = comment;
-      if (!body.startsWith(summaryKeyword) && !body.startsWith(reviewKeyword)) return;
+      if (!body.startsWith(summaryKeyword) && !body.startsWith(reviewKeyword) && !body.startsWith(askKeyword)) return;
       if (!issue.pull_request) return;
 
       const prNumber = issue.number;
-      const action = body.startsWith(reviewKeyword) ? 'review' : 'summary';
       const requestId = crypto.randomUUID();
-      structuredLog('INFO', 'Trigger received', { requestId, source: 'issue_comment', action, prNumber, repo: repository.full_name });
-      await handlePrAction(context, repository, prNumber, action, requestId);
+      const repoFull = repository.full_name;
+      if (body.startsWith(askKeyword)) {
+        const question = body.slice(askKeyword.length).trim();
+        structuredLog('INFO', 'Trigger received', { requestId, source: 'issue_comment', action: 'ask', prNumber, repo: repoFull });
+        const octokit = await getInstallationOctokit(context, repository);
+        const { data: pr } = await octokit.pulls.get({ owner: repository.owner.login, repo: repository.name, pull_number: prNumber });
+        const { data: files } = await octokit.pulls.listFiles({ owner: repository.owner.login, repo: repository.name, pull_number: prNumber });
+        let thread = '';
+        try {
+          const { data: comments } = await octokit.issues.listComments({ owner: repository.owner.login, repo: repository.name, issue_number: prNumber, per_page: 100 });
+          const prior = comments.filter(c => c.id !== comment.id)
+            .sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+          thread = prior.map(c => `${c.user?.login || 'unknown'}: ${c.body}`).join('\n');
+        } catch (e) {
+          structuredLog('WARN', 'Failed to fetch issue comments', { error: e.message, requestId });
+        }
+        await module.exports.processAskCommand(octokit, repository.owner.login, repository.name, pr, files, question, { logContext: { requestId }, thread });
+      } else {
+        const action = body.startsWith(reviewKeyword) ? 'review' : 'summary';
+        structuredLog('INFO', 'Trigger received', { requestId, source: 'issue_comment', action, prNumber, repo: repoFull });
+        await handlePrAction(context, repository, prNumber, action, requestId);
+      }
     });
   }
 
     probot.on('pull_request_review_comment.created', async (context) => {
       const { comment, pull_request: pr, repository } = context.payload;
       const { body, in_reply_to_id } = comment;
-      if (!body.startsWith(reviewKeyword) || !in_reply_to_id) return;
+      const startsReview = body.startsWith(reviewKeyword);
+      const startsAsk = body.startsWith(askKeyword);
+      if (!startsReview && !startsAsk) return;
+      if (startsReview && !in_reply_to_id) return;
       const repoOwner = repository.owner.login;
       const repoName = repository.name;
       const prNumber = pr.number;
@@ -953,14 +1023,19 @@ function registerEventHandlers(probot, options = {}) {
       structuredLog('INFO', 'Trigger received', { requestId, source: 'review_comment', prNumber, repo: repository.full_name });
       const octokit = await getInstallationOctokit(context, repository);
       let parent;
-      try {
-        const { data } = await octokit.pulls.getReviewComment({ owner: repoOwner, repo: repoName, comment_id: in_reply_to_id });
-        parent = data;
-      } catch (e) {
-        structuredLog('ERROR', 'Failed to fetch parent comment', { error: e.message, stack: e.stack, requestId });
-        return;
+      if (in_reply_to_id) {
+        try {
+          const { data } = await octokit.pulls.getReviewComment({ owner: repoOwner, repo: repoName, comment_id: in_reply_to_id });
+          parent = data;
+        } catch (e) {
+          structuredLog('ERROR', 'Failed to fetch parent comment', { error: e.message, stack: e.stack, requestId });
+          return;
+        }
+      } else {
+        parent = comment;
       }
-      const userRequest = body.slice(reviewKeyword.length).trim();
+      const keyword = startsAsk ? askKeyword : reviewKeyword;
+      const userRequest = body.slice(keyword.length).trim();
       comment.__requestId = requestId;
       await module.exports.processReviewCommentReply(octokit, repoOwner, repoName, prNumber, comment, parent, userRequest);
     });
@@ -1024,6 +1099,7 @@ module.exports = {
   registerEventHandlers,
   processFileDiff,
   processWhatCommand,
+  processAskCommand,
   processReviewCommand,
   processReviewCommentReply,
   getFileContent,
