@@ -157,7 +157,8 @@ function removeLeadingMarkdownHeading(text) {
 }
 
 function diffAnchor(file) {
-  return crypto.createHash('sha256').update(file).digest('hex');
+  // GitHub computes diff anchors using an MD5 hash of the file path
+  return crypto.createHash('md5').update(file).digest('hex');
 }
 
 function linkLineNumbers(text, refs, owner, repo, prNumber) {
@@ -583,9 +584,28 @@ async function processWhatCommand(octokit, owner, repo, pr, files, dependencies 
   const { returnSummary = false } = options;
   structuredLog('INFO', 'Summary generation started', { requestId: logContext.requestId, pr: pr.number, repo: `${owner}/${repo}` });
   try {
-    const { data } = await octokit.pulls.get({ owner, repo, pull_number: pr.number, mediaType: { format: 'diff' } })
-      .catch(error => { structuredLog('ERROR', 'Error getting PR diff', { error: error.message, stack: error.stack }); throw new Error('Failed to retrieve PR diff.'); });
-    const diff = typeof data === 'string' ? data : data.diff;
+    let diff;
+    try {
+      const { data } = await octokit.pulls.get({ owner, repo, pull_number: pr.number, mediaType: { format: 'diff' } });
+      diff = typeof data === 'string' ? data : data.diff;
+    } catch (error) {
+      structuredLog('ERROR', 'Error getting PR diff', { error: error.message, stack: error.stack });
+      throw new Error('Failed to retrieve PR diff.');
+    }
+    if (!diff) {
+      try {
+        const { data } = await octokit.request('GET /repos/{owner}/{repo}/pulls/{pull_number}', {
+          owner,
+          repo,
+          pull_number: pr.number,
+          headers: { accept: 'application/vnd.github.v3.diff' }
+        });
+        diff = data;
+      } catch (error) {
+        structuredLog('ERROR', 'Fallback diff fetch failed', { error: error.message, stack: error.stack });
+        throw new Error('Failed to retrieve PR diff.');
+      }
+    }
     structuredLog('DEBUG', 'PR diff retrieved', { requestId: logContext.requestId, diffLength: diff.length });
     
     const changed = `${files.length} files with ${files.reduce((a, f) => a + f.changes, 0)} changes`;

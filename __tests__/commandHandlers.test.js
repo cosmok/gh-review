@@ -77,6 +77,7 @@ describe('Command Handlers', () => {
             data: { content: Buffer.from('// default mock file content').toString('base64'), encoding: 'base64', size: 100 }
         })
       },
+      request: jest.fn().mockResolvedValue({ data: 'mock pr diff content' }),
     };
     jest.clearAllMocks();
   });
@@ -276,6 +277,36 @@ describe('Command Handlers', () => {
       expect(mockAnalyze).toHaveBeenCalledWith(
         expect.stringContaining('# PR Summary Request'),
         diffString,
+        'PR Summary'
+      );
+    });
+
+    it('falls back to octokit.request when diff is missing', async () => {
+      mockOctokit.pulls.get.mockResolvedValue({ data: mockPr });
+      mockOctokit.request.mockResolvedValue({ data: 'fallback diff' });
+
+      const mockAnalyze = jest.fn().mockResolvedValue('Fallback diff summary');
+
+      await processWhatCommand(
+        mockOctokit,
+        mockOwner,
+        mockRepo,
+        mockPr,
+        globalMockFiles,
+        { analyzeWithAIDep: mockAnalyze }
+      );
+
+      expect(mockOctokit.request).toHaveBeenCalledWith(
+        'GET /repos/{owner}/{repo}/pulls/{pull_number}',
+        expect.objectContaining({
+          owner: mockOwner,
+          repo: mockRepo,
+          pull_number: mockPr.number,
+        })
+      );
+      expect(mockAnalyze).toHaveBeenCalledWith(
+        expect.stringContaining('# PR Summary Request'),
+        'fallback diff',
         'PR Summary'
       );
     });
