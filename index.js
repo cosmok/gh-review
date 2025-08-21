@@ -111,12 +111,20 @@ async function analyzeWithAI(prompt, codeSnippet, filePath, context = '') {
     const preview = typeof previewSource === 'string'
       ? previewSource.split('\n').slice(0, 3).join('\n')
       : '';
-    structuredLog('ERROR', 'Error in analyzeWithAI', {
+
+    let logMessage = 'Error in analyzeWithAI';
+    const logFields = {
       filePath,
       error: message,
       preview: preview || undefined,
       stack: error.stack || undefined,
-    });
+    };
+    if (/token/i.test(message) && /(limit|length|context)/i.test(message)) {
+      logMessage = 'LLM token limit exceeded';
+      logFields.maxTokens = parseInt(process.env.LLM_MAX_TOKENS || '0', 10);
+      message = 'LLM token limit exceeded. Consider increasing LLM_MAX_TOKENS or reducing the diff size.';
+    }
+    structuredLog('ERROR', logMessage, logFields);
     throw new Error(message);
   }
 }
@@ -464,7 +472,19 @@ function generateContextDiff(baseContent, headContent, baseLinesNums, headLinesN
   const baseSnippet = baseLinesArr.slice(start, end + 1).join('\n');
   const headSnippet = headLinesArr.slice(start, end + 1).join('\n');
 
-  return createTwoFilesPatch(fileName, fileName, baseSnippet, headSnippet, '', '', { context: 10 });
+  const rawDiff = createTwoFilesPatch(fileName, fileName, baseSnippet, headSnippet, '', '', { context: 10 });
+
+  // Adjust hunk headers to reflect original line numbers
+  const offset = start; // zero-based index of first included line
+  const adjusted = rawDiff.replace(/@@ -(\d+),?(\d*) \+(\d+),?(\d*) @@/g, (m, a, b, c, d) => {
+    const oldStart = parseInt(a, 10) + offset;
+    const newStart = parseInt(c, 10) + offset;
+    const oldRange = b ? `,${b}` : '';
+    const newRange = d ? `,${d}` : '';
+    return `@@ -${oldStart}${oldRange} +${newStart}${newRange} @@`;
+  });
+
+  return adjusted;
 }
 
 async function processFileDiff(octokit, owner, repo, file, pr, logContext = {}) {
