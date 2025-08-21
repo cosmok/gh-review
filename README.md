@@ -10,6 +10,7 @@ A GitHub App that uses generative AI models like Gemini, GPT, and Claude to prov
 - **Commands**:
   - `/review`: Generates a PR summary and performs a deep code review
   - `/what`: (optional) Only produce the summary of changes
+  - `/ask`: Ask questions about the pull request or a specific diff snippet, with answers considering the entire comment thread
 - **Inline Comment Replies**: Respond to review comment threads with `/review` to analyze a specific diff snippet
 - **Configurable Triggers**: Enable reactions to custom comment keywords or pull request labels
 - **Intelligent Analysis**:
@@ -78,6 +79,7 @@ To customise the review behaviour for a repository, add a file named `AI_REVIEW_
      - `TRIGGER_LABEL` (label name to trigger review, default `ai-review`)
      - `REVIEW_COMMENT_KEYWORD` (default `/review`)
      - `SUMMARY_COMMENT_KEYWORD` (default `/what`)
+     - `ASK_COMMENT_KEYWORD` (default `/ask`)
    - (Optional) Customize instructions with:
      - `ENABLE_REPO_INSTRUCTIONS` (`false` by default)
      - `INSTRUCTION_FILENAME` (file name containing instructions, default `AI_REVIEW_INSTRUCTIONS.md`)
