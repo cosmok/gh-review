@@ -136,7 +136,7 @@ describe('Command Handlers', () => {
       expect(mockAnalyzeWithAIDep).toHaveBeenCalledTimes(processableFiles.length + 2);
 
       for (const file of processableFiles) {
-        expect(mockProcessFileDiffDep).toHaveBeenCalledWith(mockOctokit, mockOwner, mockRepo, file, mockPr);
+        expect(mockProcessFileDiffDep).toHaveBeenCalledWith(mockOctokit, mockOwner, mockRepo, file, mockPr, expect.any(Object));
         expect(mockAnalyzeWithAIDep).toHaveBeenCalledWith(
           expect.any(String),
           'mocked diff for ' + file.filename,
@@ -341,10 +341,12 @@ describe('Command Handlers', () => {
         mockRepo,
         expect.objectContaining({ number: mockPr.number }),
         expect.arrayContaining([expect.objectContaining({ filename: 'file.js' })]),
-        {
+        expect.objectContaining({
           processFileDiffDep: currentAppModuleForProbotTest.processFileDiff,
-          analyzeWithAIDep: currentAppModuleForProbotTest.analyzeWithAI
-        },
+          analyzeWithAIDep: currentAppModuleForProbotTest.analyzeWithAI,
+          initialComment: expect.any(Object),
+          logContext: expect.objectContaining({ requestId: expect.any(String) })
+        }),
         expect.any(String)
       );
   });

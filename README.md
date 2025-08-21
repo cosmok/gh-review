@@ -70,6 +70,8 @@ To customise the review behaviour for a repository, add a file named `AI_REVIEW_
        `MAX_CONTEXT_LINES`
      - `CONCURRENCY_LIMIT` (default 3)
      - `REQUEST_TIMEOUT` in milliseconds (default 30000)
+   - (Optional) Control logging with:
+     - `LOG_LEVEL` (`error`, `warn`, `info`, `debug`; default `info`)
    - (Optional) Control event triggers with:
      - `ENABLE_ISSUE_COMMENT_EVENT` (`true` by default)
      - `ENABLE_LABEL_EVENT` (`false` by default)
