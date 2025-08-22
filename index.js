@@ -76,7 +76,7 @@ async function analyzeWithAI(prompt, codeSnippet, filePath, context = '', logCon
     const inputChars = message.length;
     const inputTokens = countTokens(message);
     structuredLog('INFO', 'LLM request started', { filePath, inputChars, inputTokens, repo: logContext.repo, pr: logContext.pr, model: llmClient?.model });
-    const resultText = await llmClient.generate(message, { });
+    const resultText = await llmClient.generate(message, { logContext });
     const durationMs = Date.now() - startTime;
     const outputChars = resultText ? resultText.length : 0;
     const outputTokens = countTokens(resultText);

@@ -18,10 +18,13 @@ function createClient() {
       provider: 'openai',
       model,
       async generate(prompt, options = {}) {
+        const { logContext = {} } = options;
         const modelName = options.model || model;
         const maxTokens = parseInt(options.maxTokens || process.env.LLM_MAX_TOKENS || '1024', 10);
         const temperature = parseFloat(options.temperature || process.env.LLM_TEMPERATURE || '1');
         const topP = parseFloat(options.topP || process.env.LLM_TOP_P || '1');
+        const startTime = Date.now();
+        structuredLog('INFO', 'LLM request started', { provider: 'openai', model: modelName, repo: logContext.repo, pr: logContext.pr });
         const res = await client.chat.completions.create({
           model: modelName,
           messages: [{ role: 'user', content: prompt }],
@@ -29,6 +32,8 @@ function createClient() {
           temperature,
           top_p: topP
         });
+        const durationMs = Date.now() - startTime;
+        structuredLog('INFO', 'LLM response received', { provider: 'openai', model: modelName, repo: logContext.repo, pr: logContext.pr, durationMs });
         return res.choices[0].message.content.trim();
       }
     };
@@ -45,10 +50,13 @@ function createClient() {
       provider: 'anthropic',
       model,
       async generate(prompt, options = {}) {
+        const { logContext = {} } = options;
         const modelName = options.model || model;
         const maxTokens = parseInt(options.maxTokens || process.env.LLM_MAX_TOKENS || '1024', 10);
         const temperature = parseFloat(options.temperature || process.env.LLM_TEMPERATURE || '1');
         const topP = parseFloat(options.topP || process.env.LLM_TOP_P || '1');
+        const startTime = Date.now();
+        structuredLog('INFO', 'LLM request started', { provider: 'anthropic', model: modelName, repo: logContext.repo, pr: logContext.pr });
         const resp = await client.messages.create({
           model: modelName,
           max_tokens: maxTokens,
@@ -56,6 +64,8 @@ function createClient() {
           top_p: topP,
           messages: [{ role: 'user', content: prompt }]
         });
+        const durationMs = Date.now() - startTime;
+        structuredLog('INFO', 'LLM response received', { provider: 'anthropic', model: modelName, repo: logContext.repo, pr: logContext.pr, durationMs });
         return resp.content[0].text.trim();
       }
     };
@@ -73,6 +83,7 @@ function createClient() {
     provider: 'google',
     model,
     async generate(prompt, options = {}) {
+      const { logContext = {} } = options;
       const modelName = options.model || model;
       const generationConfig = {
         maxOutputTokens: parseInt(options.maxOutputTokens || process.env.LLM_MAX_TOKENS || '4096', 10),
@@ -80,35 +91,38 @@ function createClient() {
         topP: parseFloat(options.topP || process.env.LLM_TOP_P || '0.8'),
         topK: parseInt(options.topK || process.env.LLM_TOP_K || '40', 10)
       };
+      const startTime = Date.now();
+      structuredLog('INFO', 'LLM request started', { provider: 'google', model: modelName, repo: logContext.repo, pr: logContext.pr });
       const result = await genAI.models.generateContent({
         model: modelName,
         contents: [{ role: 'user', parts: [{ text: prompt }] }],
         config: generationConfig
       });
+      const durationMs = Date.now() - startTime;
 
       const response = result.response ?? result;
 
       if (response.promptFeedback?.blockReason) {
-        structuredLog('WARN', 'Prompt blocked', { reason: response.promptFeedback.blockReason });
+        structuredLog('WARN', 'Prompt blocked', { reason: response.promptFeedback.blockReason, repo: logContext.repo, pr: logContext.pr });
         throw new Error(`Prompt blocked: ${response.promptFeedback.blockReason}`);
       }
 
       const candidates = response.candidates || [];
       for (const [index, cand] of candidates.entries()) {
         if (cand.safetyRatings) {
-          structuredLog('INFO', 'Candidate safety ratings', { index, safetyRatings: cand.safetyRatings });
+          structuredLog('INFO', 'Candidate safety ratings', { index, safetyRatings: cand.safetyRatings, repo: logContext.repo, pr: logContext.pr });
         }
         if (cand.content?.parts) {
-          structuredLog('INFO', 'Candidate parts', { index, parts: cand.content.parts });
+          structuredLog('INFO', 'Candidate parts', { index, parts: cand.content.parts, repo: logContext.repo, pr: logContext.pr });
         }
         if (cand.finishReason === 'SAFETY') {
-          structuredLog('WARN', 'Text was filtered due to safety settings. Consider adjusting safety thresholds responsibly.');
+          structuredLog('WARN', 'Text was filtered due to safety settings. Consider adjusting safety thresholds responsibly.', { repo: logContext.repo, pr: logContext.pr });
         }
         if (cand.finishReason === 'MAX_TOKENS') {
-          structuredLog('WARN', 'Response stopped early because max_output_tokens was too low. Consider increasing max_output_tokens.');
+          structuredLog('WARN', 'Response stopped early because max_output_tokens was too low. Consider increasing max_output_tokens.', { repo: logContext.repo, pr: logContext.pr });
         }
         if (!cand.text && cand.content?.parts?.length) {
-          structuredLog('WARN', 'Candidate text is empty but parts exist. SDK shortcut missed non-text parts. Read raw candidate parts and handle tool calls or metadata explicitly.');
+          structuredLog('WARN', 'Candidate text is empty but parts exist. SDK shortcut missed non-text parts. Read raw candidate parts and handle tool calls or metadata explicitly.', { repo: logContext.repo, pr: logContext.pr });
         }
       }
 
@@ -120,10 +134,11 @@ function createClient() {
       }
 
       if (!text) {
-        structuredLog('WARN', 'LLM returned empty response. If streaming, ensure you iterate over all events and concatenate text deltas.');
+        structuredLog('WARN', 'LLM returned empty response. If streaming, ensure you iterate over all events and concatenate text deltas.', { repo: logContext.repo, pr: logContext.pr });
         throw new Error('LLM returned empty response');
       }
 
+      structuredLog('INFO', 'LLM response received', { provider: 'google', model: modelName, repo: logContext.repo, pr: logContext.pr, durationMs });
       return text.trim();
     }
   };
