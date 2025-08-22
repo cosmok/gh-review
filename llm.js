@@ -78,14 +78,46 @@ function createClient() {
         contents: [{ role: 'user', parts: [{ text: prompt }] }],
         config: generationConfig
       });
-      const text =
-        result.text ||
-        result.candidates?.[0]?.content?.parts
-          ?.map((p) => p.text || '')
+
+      const response = result.response ?? result;
+
+      if (response.promptFeedback?.blockReason) {
+        console.warn(`Prompt blocked: ${response.promptFeedback.blockReason}`);
+        throw new Error(`Prompt blocked: ${response.promptFeedback.blockReason}`);
+      }
+
+      const candidates = response.candidates || [];
+      for (const [index, cand] of candidates.entries()) {
+        console.log(`Candidate ${index} finishReason:`, cand.finishReason);
+        if (cand.safetyRatings) {
+          console.log(`Candidate ${index} safetyRatings:`, cand.safetyRatings);
+        }
+        if (cand.content?.parts) {
+          console.log(`Candidate ${index} parts:`, cand.content.parts);
+        }
+        if (cand.finishReason === 'SAFETY') {
+          console.warn('Text was filtered due to safety settings. Consider adjusting safety thresholds responsibly.');
+        }
+        if (cand.finishReason === 'MAX_TOKENS') {
+          console.warn('Response stopped early because max_output_tokens was too low. Consider increasing max_output_tokens.');
+        }
+        if (!cand.text && cand.content?.parts?.length) {
+          console.warn('Candidate text is empty but parts exist. SDK shortcut missed non-text parts. Read raw candidate parts and handle tool calls or metadata explicitly.');
+        }
+      }
+
+      let text = response.text;
+      if (!text && candidates.length) {
+        text = candidates
+          .map((c) => c.text || (c.content?.parts || []).map((p) => p.text || '').join(''))
           .join('');
+      }
+
       if (!text) {
+        console.warn('LLM returned empty response. If streaming, ensure you iterate over all events and concatenate text deltas.');
         throw new Error('LLM returned empty response');
       }
+
       return text.trim();
     }
   };
