@@ -12,15 +12,17 @@ function createClient() {
     }
     const apiKey = process.env.OPENAI_API_KEY;
     const client = new OpenAI({ apiKey });
+    const model = process.env.OPENAI_MODEL || 'gpt-3.5-turbo';
     return {
       provider: 'openai',
+      model,
       async generate(prompt, options = {}) {
-        const model = options.model || process.env.OPENAI_MODEL || 'gpt-3.5-turbo';
+        const modelName = options.model || model;
         const maxTokens = parseInt(options.maxTokens || process.env.LLM_MAX_TOKENS || '1024', 10);
         const temperature = parseFloat(options.temperature || process.env.LLM_TEMPERATURE || '1');
         const topP = parseFloat(options.topP || process.env.LLM_TOP_P || '1');
         const res = await client.chat.completions.create({
-          model,
+          model: modelName,
           messages: [{ role: 'user', content: prompt }],
           max_tokens: maxTokens,
           temperature,
@@ -37,15 +39,17 @@ function createClient() {
     }
     const apiKey = process.env.ANTHROPIC_API_KEY;
     const client = new Anthropic({ apiKey });
+    const model = process.env.ANTHROPIC_MODEL || 'claude-3-sonnet-20240229';
     return {
       provider: 'anthropic',
+      model,
       async generate(prompt, options = {}) {
-        const model = options.model || process.env.ANTHROPIC_MODEL || 'claude-3-sonnet-20240229';
+        const modelName = options.model || model;
         const maxTokens = parseInt(options.maxTokens || process.env.LLM_MAX_TOKENS || '1024', 10);
         const temperature = parseFloat(options.temperature || process.env.LLM_TEMPERATURE || '1');
         const topP = parseFloat(options.topP || process.env.LLM_TOP_P || '1');
         const resp = await client.messages.create({
-          model,
+          model: modelName,
           max_tokens: maxTokens,
           temperature,
           top_p: topP,
@@ -63,10 +67,12 @@ function createClient() {
     throw new Error('Missing GOOGLE_CLOUD_PROJECT or GOOGLE_CLOUD_LOCATION');
   }
   const genAI = new GoogleGenAI({ vertexai: true, project, location });
+  const model = process.env.GENAI_MODEL || 'gemini-2.5-flash-preview-05-20';
   return {
     provider: 'google',
+    model,
     async generate(prompt, options = {}) {
-      const model = options.model || process.env.GENAI_MODEL || 'gemini-2.5-flash-preview-05-20';
+      const modelName = options.model || model;
       const generationConfig = {
         maxOutputTokens: parseInt(options.maxOutputTokens || process.env.LLM_MAX_TOKENS || '4096', 10),
         temperature: parseFloat(options.temperature || process.env.LLM_TEMPERATURE || '0.2'),
@@ -74,7 +80,7 @@ function createClient() {
         topK: parseInt(options.topK || process.env.LLM_TOP_K || '40', 10)
       };
       const result = await genAI.models.generateContent({
-        model,
+        model: modelName,
         contents: [{ role: 'user', parts: [{ text: prompt }] }],
         config: generationConfig
       });

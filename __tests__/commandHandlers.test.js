@@ -143,7 +143,8 @@ describe('Command Handlers', () => {
           expect.any(String),
           'mocked diff for ' + file.filename,
           file.filename,
-          'mocked context for ' + file.filename
+          'mocked context for ' + file.filename,
+          expect.any(Object)
         );
         expect(updatedCommentBody).toContain('Detailed AI analysis for a file.');
       }
@@ -256,7 +257,9 @@ describe('Command Handlers', () => {
       expect(mockAnalyzeWithAI_what).toHaveBeenCalledWith(
         expect.stringContaining('# PR Summary Request'),
         mockDiffResponseData.diff,
-        'PR Summary'
+        'PR Summary',
+        undefined,
+        expect.any(Object)
       );
     });
 
@@ -278,7 +281,9 @@ describe('Command Handlers', () => {
       expect(mockAnalyze).toHaveBeenCalledWith(
         expect.stringContaining('# PR Summary Request'),
         diffString,
-        'PR Summary'
+        'PR Summary',
+        undefined,
+        expect.any(Object)
       );
     });
 
@@ -308,7 +313,9 @@ describe('Command Handlers', () => {
       expect(mockAnalyze).toHaveBeenCalledWith(
         expect.stringContaining('# PR Summary Request'),
         'fallback diff',
-        'PR Summary'
+        'PR Summary',
+        undefined,
+        expect.any(Object)
       );
     });
   });
@@ -533,7 +540,8 @@ describe('Command Handlers', () => {
         1,
         expect.objectContaining({ id: 123 }),
         expect.objectContaining({ id: 5 }),
-        'please'
+        'please',
+        expect.any(Object)
       );
     });
 
@@ -561,7 +569,8 @@ describe('Command Handlers', () => {
         1,
         expect.objectContaining({ id: 321 }),
         expect.objectContaining({ id: 5 }),
-        ''
+        '',
+        expect.any(Object)
       );
     });
 
@@ -598,7 +607,8 @@ describe('Command Handlers', () => {
         1,
         expect.objectContaining({ id: 456 }),
         expect.objectContaining({ id: 5 }),
-        'please /review again'
+        'please /review again',
+        expect.any(Object)
       );
     });
 
@@ -641,7 +651,8 @@ describe('Command Handlers', () => {
         1,
         expect.objectContaining({ id: 777 }),
         expect.objectContaining({ id: 777 }),
-        'what?'
+        'what?',
+        expect.any(Object)
       );
     });
   });
@@ -715,8 +726,8 @@ describe('Command Handlers', () => {
       const analyze = jest.fn().mockResolvedValue('answer');
       const pr = { number: 1 };
       await processAskCommand(mockOcto, 'o', 'r', pr, [], 'why?', { analyzeWithAIDep: analyze, thread: 'alice: hi' });
-      expect(analyze).toHaveBeenCalledWith(expect.any(String), 'diff data', 'PR Question', expect.stringContaining('alice: hi'));
-      expect(analyze).toHaveBeenCalledWith(expect.any(String), 'diff data', 'PR Question', expect.stringContaining('cm'));
+      expect(analyze).toHaveBeenCalledWith(expect.any(String), 'diff data', 'PR Question', expect.stringContaining('alice: hi'), expect.any(Object));
+      expect(analyze).toHaveBeenCalledWith(expect.any(String), 'diff data', 'PR Question', expect.stringContaining('cm'), expect.any(Object));
       expect(mockOcto.issues.createComment).toHaveBeenCalledWith(expect.objectContaining({ body: 'answer' }));
     });
   });
