@@ -107,6 +107,10 @@
       "description": "Respond to issue comments",
       "value": "true"
     },
+    "ENABLE_REVIEW_COMMENT_EVENT": {
+      "description": "Respond to review comments",
+      "value": "true"
+    },
     "ENABLE_LABEL_EVENT": {
       "description": "Respond to label events",
       "value": "false"
