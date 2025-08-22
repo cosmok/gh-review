@@ -166,6 +166,10 @@ async function getFileContent(octokit, owner, repo, path, ref, options = {}) {
   const { startLine, endLine, contextLines } = options;
   try {
     const { data } = await octokit.repos.getContent({ owner, repo, path, ref });
+    if (Array.isArray(data)) {
+      structuredLog('WARN', 'Path does not resolve to a file', { path, ref });
+      return '[Directory content not supported]';
+    }
     const fileSize = typeof data === 'string' ? Buffer.byteLength(data) : data.size;
     if (fileSize > MAX_FILE_SIZE) {
       structuredLog('INFO', 'Truncating large file', { path, fileSize });
