@@ -563,6 +563,10 @@ async function processAskCommand(octokit, owner, repo, pr, files, question, depe
   logContext.pr = logContext.pr || pr.number;
   logContext.totalTokens = logContext.totalTokens || 0;
   structuredLog('INFO', 'Question processing started', { requestId: logContext.requestId, pr: pr.number, repo: `${owner}/${repo}` });
+  if (!question || !question.trim()) {
+    await octokit.issues.createComment({ owner, repo, issue_number: pr.number, body: '❌ No question provided.' });
+    return;
+  }
   let diff = '';
   try {
     const { data } = await octokit.pulls.get({ owner, repo, pull_number: pr.number, mediaType: { format: 'diff' } });

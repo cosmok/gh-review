@@ -730,5 +730,18 @@ describe('Command Handlers', () => {
       expect(analyze).toHaveBeenCalledWith(expect.any(String), 'diff data', 'PR Question', expect.stringContaining('cm'), expect.any(Object));
       expect(mockOcto.issues.createComment).toHaveBeenCalledWith(expect.objectContaining({ body: 'answer' }));
     });
+
+    it('handles missing question', async () => {
+      const mockOcto = {
+        pulls: { get: jest.fn(), listCommits: jest.fn() },
+        issues: { createComment: jest.fn().mockResolvedValue({}) }
+      };
+      const analyze = jest.fn();
+      const pr = { number: 1 };
+      await processAskCommand(mockOcto, 'o', 'r', pr, [], '   ', { analyzeWithAIDep: analyze });
+      expect(mockOcto.pulls.get).not.toHaveBeenCalled();
+      expect(analyze).not.toHaveBeenCalled();
+      expect(mockOcto.issues.createComment).toHaveBeenCalledWith(expect.objectContaining({ body: '❌ No question provided.' }));
+    });
   });
 });
