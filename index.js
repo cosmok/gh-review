@@ -50,8 +50,9 @@ const requiredVars = [
 
 for (const varName of requiredVars) {
   if (!process.env[varName]) {
-    structuredLog('ERROR', 'Missing required environment variable', { varName });
-    process.exit(1); // Exit if env vars are missing
+    const message = `Missing required environment variable: ${varName}`;
+    structuredLog('ERROR', message, { varName });
+    throw new Error(message);
   }
 }
 
@@ -887,6 +888,7 @@ async function handlePrAction(context, repository, prNumber, action, requestId) 
 function registerEventHandlers(probot, options = {}) {
   const {
     enableIssueComment = process.env.ENABLE_ISSUE_COMMENT_EVENT !== 'false',
+    enableReviewComment = process.env.ENABLE_REVIEW_COMMENT_EVENT !== 'false',
     enableLabel = process.env.ENABLE_LABEL_EVENT === 'true',
     reviewLabel = process.env.TRIGGER_LABEL || 'ai-review',
     reviewKeyword = process.env.REVIEW_COMMENT_KEYWORD || '/review',
@@ -928,6 +930,7 @@ function registerEventHandlers(probot, options = {}) {
     });
   }
 
+  if (enableReviewComment) {
     probot.on('pull_request_review_comment.created', async (context) => {
       const { comment, pull_request: pr, repository } = context.payload;
       const { body, in_reply_to_id } = comment;
@@ -958,6 +961,7 @@ function registerEventHandlers(probot, options = {}) {
       comment.__requestId = requestId;
       await module.exports.processReviewCommentReply(octokit, repoOwner, repoName, prNumber, comment, parent, userRequest, { requestId, repo: repository.full_name, totalTokens: 0 });
     });
+  }
 
   if (enableLabel) {
     probot.on('pull_request.labeled', async (context) => {

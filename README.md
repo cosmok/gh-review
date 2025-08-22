@@ -75,6 +75,7 @@ To customise the review behaviour for a repository, add a file named `AI_REVIEW_
      - `LOG_LEVEL` (`error`, `warn`, `info`, `debug`; default `info`)
    - (Optional) Control event triggers with:
      - `ENABLE_ISSUE_COMMENT_EVENT` (`true` by default)
+     - `ENABLE_REVIEW_COMMENT_EVENT` (`true` by default)
      - `ENABLE_LABEL_EVENT` (`false` by default)
      - `TRIGGER_LABEL` (label name to trigger review, default `ai-review`)
      - `REVIEW_COMMENT_KEYWORD` (default `/review`)
