@@ -772,7 +772,18 @@ async function processReviewCommand(octokit, owner, repo, pr, files, dependencie
 
     reviewBody += '---\n🔍 This is an automated review powered by AI.\n⚠️ This is a best-effort review and may not catch all issues.\n🔍 Always perform your own thorough review before merging.\n⏱️ Total processing time: ' + processingTime.toFixed(1) + 's';
     await octokit.issues.updateComment({ owner, repo, comment_id: reviewComment.id, body: reviewBody });
-    structuredLog('INFO', 'Review completed', { requestId: logContext.requestId, pr: pr.number, repo: `${owner}/${repo}`, filesReviewed: results.length, processingTime, totalTokens: logContext.totalTokens, model: llmClient?.model });
+    const filesProcessed = results.length;
+    const issuesIdentified = filesWithIssues.length;
+    structuredLog('INFO', 'Review completed', {
+      requestId: logContext.requestId,
+      pr: pr.number,
+      repo: `${owner}/${repo}`,
+      filesProcessed,
+      issuesIdentified,
+      processingTime,
+      totalTokens: logContext.totalTokens,
+      model: llmClient?.model
+    });
   } catch (error) {
     structuredLog('ERROR', 'Error in processReviewCommand', { error: error.message, stack: error.stack, requestId: logContext.requestId });
     try {
