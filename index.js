@@ -8,6 +8,7 @@ const { createTwoFilesPatch } = require('diff');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
+const { structuredLog } = require('./logger');
 
 function loadPrompt(filename, values = {}) {
   const fullPath = path.join(__dirname, 'prompts', filename);
@@ -19,34 +20,6 @@ function loadPrompt(filename, values = {}) {
   return template;
 }
 
-// Configuration constants
-const LOG_LEVELS = { error: 0, warn: 1, info: 2, debug: 3 };
-const LOG_LEVEL = (process.env.LOG_LEVEL || 'info').toLowerCase();
-const CURRENT_LOG_LEVEL = LOG_LEVELS[LOG_LEVEL] ?? LOG_LEVELS.info;
-
-function structuredLog(severity, message, fields = {}) {
-  const normalized = severity.toLowerCase();
-  const levelKey = normalized === 'warning' ? 'warn' : normalized;
-  const severityLevel = LOG_LEVELS[levelKey] ?? LOG_LEVELS.info;
-  if (severityLevel > CURRENT_LOG_LEVEL) return;
-  const logData = JSON.stringify({ severity: levelKey, message, ...fields, timestamp: new Date().toISOString() });
-  switch (levelKey) {
-    case 'error':
-      console.error(logData);
-      break;
-    case 'warn':
-      console.warn(logData);
-      break;
-    case 'info':
-      console.info(logData);
-      break;
-    case 'debug':
-      console.debug(logData);
-      break;
-    default:
-      console.log(logData); // Fallback for unknown or default severity
-  }
-}
 const MAX_FILE_SIZE = parseInt(process.env.MAX_FILE_SIZE || '100000', 10);
 const MAX_DIFF_LENGTH = parseInt(process.env.MAX_DIFF_LENGTH || '8000', 10);
 const MAX_DIFF_LINES = parseInt(process.env.MAX_DIFF_LINES || '500', 10);
@@ -95,28 +68,31 @@ function countTokens(text) {
 async function analyzeWithAI(prompt, codeSnippet, filePath, context = '', logContext = {}) {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT);
+  const startTime = Date.now();
   try {
     const truncatedSnippet = truncateToLines(codeSnippet, MAX_DIFF_LINES);
     const truncatedContext = context ? truncateToLines(context, MAX_CONTEXT_LINES) : '';
     const message = `# Code Review Task: ${filePath}\n\n## Context\n${truncatedContext || 'No additional context provided.'}\n\n## Changes\n\`\`\`diff\n${truncatedSnippet}\n\`\`\`\n\n## Instructions\n${prompt}\n\n## Guidelines\n- Be specific and reference line numbers from the diff\n- Only report issues you're certain about\n- Suggest concrete improvements when possible`;
     const inputChars = message.length;
     const inputTokens = countTokens(message);
-    structuredLog('INFO', 'LLM request started', { filePath, inputChars, inputTokens, repo: logContext.repo, model: llmClient?.model });
+    structuredLog('INFO', 'LLM request started', { filePath, inputChars, inputTokens, repo: logContext.repo, pr: logContext.pr, model: llmClient?.model });
     const resultText = await llmClient.generate(message, { });
+    const durationMs = Date.now() - startTime;
     const outputChars = resultText ? resultText.length : 0;
     const outputTokens = countTokens(resultText);
     logContext.totalTokens = (logContext.totalTokens || 0) + inputTokens + outputTokens;
-    structuredLog('INFO', 'LLM response received', { filePath, outputChars, outputTokens, repo: logContext.repo, model: llmClient?.model });
+    structuredLog('INFO', 'LLM response received', { filePath, outputChars, outputTokens, repo: logContext.repo, pr: logContext.pr, model: llmClient?.model, durationMs });
     if (!resultText) {
-      structuredLog('WARNING', 'LLM returned empty response', { filePath });
+      structuredLog('WARN', 'LLM returned empty response', { filePath, pr: logContext.pr, durationMs });
     }
     clearTimeout(timeoutId);
     return resultText;
   } catch (error) {
     clearTimeout(timeoutId);
+    const durationMs = Date.now() - startTime;
     if (error.name === 'AbortError') {
       const msg = 'Analysis timed out. The diff might be too large or the service might be busy.';
-      structuredLog('WARNING', 'AI analysis timed out', { filePath });
+      structuredLog('WARN', 'AI analysis timed out', { filePath, pr: logContext.pr, durationMs });
       throw new Error(msg);
     }
     let message = error.message || 'Unknown error';
@@ -131,6 +107,8 @@ async function analyzeWithAI(prompt, codeSnippet, filePath, context = '', logCon
     let logMessage = 'Error in analyzeWithAI';
     const logFields = {
       filePath,
+      pr: logContext.pr,
+      durationMs,
       error: message,
       preview: preview || undefined,
       stack: error.stack || undefined,
@@ -590,6 +568,7 @@ async function processWhatCommand(octokit, owner, repo, pr, files, dependencies 
   } = dependencies;
   const { returnSummary = false } = options;
   logContext.repo = logContext.repo || `${owner}/${repo}`;
+  logContext.pr = logContext.pr || pr.number;
   logContext.totalTokens = logContext.totalTokens || 0;
   structuredLog('INFO', 'Summary generation started', { requestId: logContext.requestId, pr: pr.number, repo: `${owner}/${repo}` });
   try {
@@ -662,6 +641,7 @@ async function processAskCommand(octokit, owner, repo, pr, files, question, depe
     thread = ''
   } = dependencies;
   logContext.repo = logContext.repo || `${owner}/${repo}`;
+  logContext.pr = logContext.pr || pr.number;
   logContext.totalTokens = logContext.totalTokens || 0;
   structuredLog('INFO', 'Question processing started', { requestId: logContext.requestId, pr: pr.number, repo: `${owner}/${repo}` });
   let diff = '';
@@ -699,6 +679,7 @@ async function processReviewCommand(octokit, owner, repo, pr, files, dependencie
     logContext = {}
   } = dependencies;
   logContext.repo = logContext.repo || `${owner}/${repo}`;
+  logContext.pr = logContext.pr || pr.number;
   logContext.totalTokens = logContext.totalTokens || 0;
   let reviewComment;
   const postedLineAnalyses = new Set();
@@ -878,6 +859,7 @@ async function processReviewCommentReply(octokit, owner, repo, prNumber, comment
     throw new Error('Missing required parameters');
   }
   logContext.repo = logContext.repo || `${owner}/${repo}`;
+  logContext.pr = logContext.pr || prNumber;
   logContext.totalTokens = logContext.totalTokens || 0;
   const requestId = logContext.requestId || comment.__requestId;
   try {

@@ -2,6 +2,7 @@ let GoogleGenAI, OpenAI, Anthropic;
 try { GoogleGenAI = require('@google/genai').GoogleGenAI; } catch (e) { GoogleGenAI = null; }
 try { OpenAI = require('openai').OpenAI; } catch (e) { OpenAI = null; }
 try { Anthropic = require('@anthropic-ai/sdk').Anthropic; } catch (e) { Anthropic = null; }
+const { structuredLog } = require('./logger');
 
 function createClient() {
   const provider = (process.env.LLM_PROVIDER || 'google').toLowerCase();
@@ -88,26 +89,26 @@ function createClient() {
       const response = result.response ?? result;
 
       if (response.promptFeedback?.blockReason) {
-        console.warn(`Prompt blocked: ${response.promptFeedback.blockReason}`);
+        structuredLog('WARN', 'Prompt blocked', { reason: response.promptFeedback.blockReason });
         throw new Error(`Prompt blocked: ${response.promptFeedback.blockReason}`);
       }
 
       const candidates = response.candidates || [];
       for (const [index, cand] of candidates.entries()) {
         if (cand.safetyRatings) {
-          console.log(`Candidate ${index} safetyRatings:`, cand.safetyRatings);
+          structuredLog('INFO', 'Candidate safety ratings', { index, safetyRatings: cand.safetyRatings });
         }
         if (cand.content?.parts) {
-          console.log(`Candidate ${index} parts:`, cand.content.parts);
+          structuredLog('INFO', 'Candidate parts', { index, parts: cand.content.parts });
         }
         if (cand.finishReason === 'SAFETY') {
-          console.warn('Text was filtered due to safety settings. Consider adjusting safety thresholds responsibly.');
+          structuredLog('WARN', 'Text was filtered due to safety settings. Consider adjusting safety thresholds responsibly.');
         }
         if (cand.finishReason === 'MAX_TOKENS') {
-          console.warn('Response stopped early because max_output_tokens was too low. Consider increasing max_output_tokens.');
+          structuredLog('WARN', 'Response stopped early because max_output_tokens was too low. Consider increasing max_output_tokens.');
         }
         if (!cand.text && cand.content?.parts?.length) {
-          console.warn('Candidate text is empty but parts exist. SDK shortcut missed non-text parts. Read raw candidate parts and handle tool calls or metadata explicitly.');
+          structuredLog('WARN', 'Candidate text is empty but parts exist. SDK shortcut missed non-text parts. Read raw candidate parts and handle tool calls or metadata explicitly.');
         }
       }
 
@@ -119,7 +120,7 @@ function createClient() {
       }
 
       if (!text) {
-        console.warn('LLM returned empty response. If streaming, ensure you iterate over all events and concatenate text deltas.');
+        structuredLog('WARN', 'LLM returned empty response. If streaming, ensure you iterate over all events and concatenate text deltas.');
         throw new Error('LLM returned empty response');
       }
 
