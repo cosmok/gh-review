@@ -86,6 +86,14 @@ function shouldPostInlineComment(comment) {
   return !skipPhrases.some(p => c.includes(p));
 }
 
+function addSuggestionFormatting(comment) {
+  if (!comment) return '';
+  return comment.replace(/```(?:diff|patch)\n([\s\S]*?)```/g, (_match, code) => {
+    const trimmed = code.trim();
+    return '```suggestion\n' + trimmed + '\n```';
+  });
+}
+
 module.exports = {
   countTokens,
   truncateToLines,
@@ -94,5 +102,6 @@ module.exports = {
   linkLineNumbers,
   getSurroundingLines,
   shouldPostInlineComment,
+   addSuggestionFormatting,
 };
 
