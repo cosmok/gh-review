@@ -94,7 +94,6 @@ function createClient() {
 
       const candidates = response.candidates || [];
       for (const [index, cand] of candidates.entries()) {
-        console.log(`Candidate ${index} finishReason:`, cand.finishReason);
         if (cand.safetyRatings) {
           console.log(`Candidate ${index} safetyRatings:`, cand.safetyRatings);
         }
