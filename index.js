@@ -17,6 +17,7 @@ const {
   diffAnchor,
   getSurroundingLines,
   shouldPostInlineComment,
+  addSuggestionFormatting,
 } = require('./utils');
 
 function loadPrompt(filename, values = {}) {
@@ -695,6 +696,7 @@ async function processReviewCommand(octokit, owner, repo, pr, files, dependencie
             for (const { lines, comment } of lineAnalyses) {
               const trimmed = comment.trim();
               if (!shouldPostInlineComment(trimmed)) continue;
+              const formatted = addSuggestionFormatting(trimmed);
               const key = trimmed.toLowerCase();
               if (!postedLineAnalyses.has(key)) {
                 postedLineAnalyses.add(key);
@@ -705,7 +707,7 @@ async function processReviewCommand(octokit, owner, repo, pr, files, dependencie
                     pull_number: pr.number,
                     commit_id: pr.head.sha,
                     path: info.filename,
-                    body: `${trimmed}\n\n_Lines: ${lines.join(', ')}_`,
+                    body: `${formatted}\n\n_Lines: ${lines.join(', ')}_`,
                     line: lines[0],
                     side: 'RIGHT'
                   });
