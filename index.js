@@ -50,8 +50,9 @@ const requiredVars = [
 
 for (const varName of requiredVars) {
   if (!process.env[varName]) {
-    structuredLog('ERROR', 'Missing required environment variable', { varName });
-    process.exit(1); // Exit if env vars are missing
+    const message = `Missing required environment variable: ${varName}`;
+    structuredLog('ERROR', message, { varName });
+    throw new Error(message);
   }
 }
 
