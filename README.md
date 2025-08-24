@@ -9,10 +9,12 @@ A GitHub App that uses generative AI models like Gemini, GPT, and Claude to prov
 - **AI-Powered Code Review**: Analyze code using your choice of Gemini, GPT, or Claude models
 - **Commands**:
   - `/review`: Generates a PR summary and performs a deep code review
+  - `/review security`: Runs a security-focused analysis
   - `/what`: (optional) Only produce the summary of changes
   - `/ask`: Ask questions about the pull request or a specific diff snippet, with answers considering the entire comment thread
 - **Inline Comment Replies**: Respond to review comment threads with `/review` to analyze a specific diff snippet
 - **Configurable Triggers**: Enable reactions to custom comment keywords or pull request labels
+  - Adding the `security-review` label requests a security audit of the PR
 - **Intelligent Analysis**:
   - Identifies bugs and logical errors
   - Detects potential security vulnerabilities
@@ -26,6 +28,8 @@ A GitHub App that uses generative AI models like Gemini, GPT, and Claude to prov
 All prompts used for AI analysis live under the `prompts/` directory. The app loads these templates at runtime and fills in variables such as the file name or manager instructions before sending them to the configured model. Editing the text files allows you to tweak the review style without changing code.
 
 To customise the review behaviour for a repository, add a file named `AI_REVIEW_INSTRUCTIONS.md` to the repository root or within any folder. The contents of the closest instructions file are inserted into the review prompts for files in that directory. See `AI_REVIEW_INSTRUCTIONS_TEMPLATE.md` for an example template.
+
+To override the default security review prompt, add a `SECURITY_REVIEW_PROMPT.md` file to the repository root. This file replaces the built-in security template and supports placeholders like `{{repoLanguages}}`.
 
 ## Setup
 
@@ -84,6 +88,7 @@ To customise the review behaviour for a repository, add a file named `AI_REVIEW_
    - (Optional) Customize instructions with:
      - `ENABLE_REPO_INSTRUCTIONS` (`false` by default)
      - `INSTRUCTION_FILENAME` (file name containing instructions, default `AI_REVIEW_INSTRUCTIONS.md`)
+     - `SECURITY_PROMPT_FILENAME` (file name for security review prompt override, default `SECURITY_REVIEW_PROMPT.md`)
 
 ### Deploy to Cloud Run
 

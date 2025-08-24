@@ -38,6 +38,7 @@ const REQUEST_TIMEOUT = parseInt(process.env.REQUEST_TIMEOUT || '30000', 10);
 const CONCURRENCY_LIMIT = parseInt(process.env.CONCURRENCY_LIMIT || '3', 10);
 const MAX_FILES_TO_PROCESS = parseInt(process.env.MAX_FILES_TO_PROCESS || '20', 10);
 const INSTRUCTION_FILENAME = process.env.INSTRUCTION_FILENAME || 'AI_REVIEW_INSTRUCTIONS.md';
+const SECURITY_PROMPT_FILENAME = process.env.SECURITY_PROMPT_FILENAME || 'SECURITY_REVIEW_PROMPT.md';
 const ENABLE_REPO_INSTRUCTIONS = (process.env.ENABLE_REPO_INSTRUCTIONS  &&  process.env.ENABLE_REPO_INSTRUCTIONS == 'true') ? true : false;
 // Label that triggers an AI review when added to a PR
 const TRIGGER_LABEL = process.env.TRIGGER_LABEL || 'ai-review';
@@ -248,6 +249,24 @@ async function getRepoInstructions(octokit, owner, repo, filePath, ref) {
     return `${folderLevel}\n\n${repoLevel}`;
   }
   return folderLevel || repoLevel || '';
+}
+
+async function loadSecurityPrompt(octokit, owner, repo, ref, values = {}) {
+  let template = '';
+  try {
+    const content = await getFileContent(octokit, owner, repo, SECURITY_PROMPT_FILENAME, ref);
+    if (content && !content.startsWith('[File not found')) template = content;
+  } catch (e) {
+    if (e.status !== 404) {
+      structuredLog('ERROR', 'Error reading security prompt', { path: SECURITY_PROMPT_FILENAME, error: e.message });
+    }
+  }
+  if (!template) template = loadPrompt('security_review.md');
+  for (const [key, val] of Object.entries(values)) {
+    const regex = new RegExp(`{{\s*${key}\s*}}`, 'g');
+    template = template.replace(regex, val);
+  }
+  return template;
 }
 
 function summarizePackageJsonChanges(baseContent, headContent) {
@@ -795,6 +814,42 @@ async function processReviewCommand(octokit, owner, repo, pr, files, dependencie
   }
 }
 
+async function processSecurityReviewCommand(octokit, owner, repo, pr, files, dependencies = {}) {
+  const { analyzeWithAIDep = analyzeWithAI, logContext = {} } = dependencies;
+  logContext.repo = logContext.repo || `${owner}/${repo}`;
+  logContext.pr = logContext.pr || pr.number;
+  logContext.totalTokens = logContext.totalTokens || 0;
+  try {
+    let repoLanguages = 'Unknown';
+    try {
+      const { data: langs } = await octokit.repos.listLanguages({ owner, repo });
+      repoLanguages = Object.keys(langs).join(', ') || 'Unknown';
+    } catch (e) {
+      structuredLog('WARN', 'Failed to fetch languages', { error: e.message, requestId: logContext.requestId });
+    }
+    const combinedDiff = files
+      .filter(f => f.patch)
+      .map(f => `### ${f.filename}\n${f.patch}`)
+      .join('\n');
+    const prompt = await loadSecurityPrompt(octokit, owner, repo, pr.head?.sha, { repoLanguages });
+    const { data: comment } = await octokit.issues.createComment({
+      owner,
+      repo,
+      issue_number: pr.number,
+      body: '🔒 Starting AI security review... This may take a few minutes.'
+    });
+    try {
+      const analysis = await analyzeWithAIDep(prompt, combinedDiff, 'Security Review', undefined, logContext);
+      const body = `## 🔐 Security Review\n\n${removeLeadingMarkdownHeading(analysis)}\n\n---\n🔍 This is an automated security review.`;
+      await octokit.issues.updateComment({ owner, repo, comment_id: comment.id, body });
+    } catch (e) {
+      await octokit.issues.updateComment({ owner, repo, comment_id: comment.id, body: `❌ Error generating security review: ${e.message}` });
+    }
+  } catch (error) {
+    structuredLog('ERROR', 'Error in processSecurityReviewCommand', { error: error.message, stack: error.stack, requestId: logContext.requestId });
+  }
+}
+
 async function processReviewCommentReply(octokit, owner, repo, prNumber, comment, parent, requestText = '', logContext = {}) {
   if (!octokit || !owner || !repo || !prNumber || !comment || !parent) {
     throw new Error('Missing required parameters');
@@ -889,6 +944,8 @@ async function handlePrAction(context, repository, prNumber, action, requestId) 
       });
       octokit.__initialReviewComment = initialComment;
       await module.exports.processReviewCommand(octokit, repoOwner, repoName, pr, files, { ...deps, initialComment }, summary);
+    } else if (action === 'security') {
+      await module.exports.processSecurityReviewCommand(octokit, repoOwner, repoName, pr, files, deps);
     }
   } catch (error) {
     structuredLog('ERROR', 'Error processing PR event', { error: error.message, stack: error.stack, requestId });
@@ -908,6 +965,7 @@ function registerEventHandlers(probot, options = {}) {
     enableReviewComment = process.env.ENABLE_REVIEW_COMMENT_EVENT !== 'false',
     enableLabel = process.env.ENABLE_LABEL_EVENT === 'true',
     reviewLabel = process.env.TRIGGER_LABEL || 'ai-review',
+    securityReviewLabel = process.env.SECURITY_REVIEW_LABEL || 'security-review',
     reviewKeyword = process.env.REVIEW_COMMENT_KEYWORD || '/review',
     summaryKeyword = process.env.SUMMARY_COMMENT_KEYWORD || '/what',
     askKeyword = process.env.ASK_COMMENT_KEYWORD || '/ask',
@@ -940,7 +998,13 @@ function registerEventHandlers(probot, options = {}) {
         }
         await module.exports.processAskCommand(octokit, repository.owner.login, repository.name, pr, files, question, { logContext: { requestId, repo: repoFull, totalTokens: 0 }, thread });
       } else {
-        const action = body.startsWith(reviewKeyword) ? 'review' : 'summary';
+        let action;
+        if (body.startsWith(reviewKeyword)) {
+          const cmd = body.slice(reviewKeyword.length).trim().toLowerCase();
+          action = cmd.startsWith('security') ? 'security' : 'review';
+        } else {
+          action = 'summary';
+        }
         structuredLog('INFO', 'Trigger received', { requestId, source: 'issue_comment', action, prNumber, repo: repoFull });
         await handlePrAction(context, repository, prNumber, action, requestId);
       }
@@ -983,10 +1047,15 @@ function registerEventHandlers(probot, options = {}) {
   if (enableLabel) {
     probot.on('pull_request.labeled', async (context) => {
       const { label, pull_request: pr, repository } = context.payload;
-      if (!label || label.name !== reviewLabel) return;
+      if (!label) return;
       const requestId = crypto.randomUUID();
-      structuredLog('INFO', 'Trigger received', { requestId, source: 'label', action: 'review', prNumber: pr.number, repo: repository.full_name });
-      await handlePrAction(context, repository, pr.number, 'review', requestId);
+      if (label.name === reviewLabel) {
+        structuredLog('INFO', 'Trigger received', { requestId, source: 'label', action: 'review', prNumber: pr.number, repo: repository.full_name });
+        await handlePrAction(context, repository, pr.number, 'review', requestId);
+      } else if (label.name === securityReviewLabel) {
+        structuredLog('INFO', 'Trigger received', { requestId, source: 'label', action: 'security', prNumber: pr.number, repo: repository.full_name });
+        await handlePrAction(context, repository, pr.number, 'security', requestId);
+      }
     });
   }
 
@@ -1041,6 +1110,7 @@ module.exports = {
   processWhatCommand,
   processAskCommand,
   processReviewCommand,
+  processSecurityReviewCommand,
   processReviewCommentReply,
   getFileContent,
   getChangedLineNumbers,
@@ -1063,6 +1133,7 @@ module.exports = {
     MAX_FILES_TO_PROCESS,
     TRIGGER_LABEL,
     INSTRUCTION_FILENAME,
+    SECURITY_PROMPT_FILENAME,
     ENABLE_REPO_INSTRUCTIONS
   }
 };
