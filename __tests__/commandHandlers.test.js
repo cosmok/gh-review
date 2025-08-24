@@ -1,5 +1,6 @@
 const nock = require('nock');
 const { Probot, ProbotOctokit } = require('probot');
+const { Octokit } = require('@octokit/rest');
 const appModule = require('../index.js');
 
 const {
@@ -8,8 +9,10 @@ const {
   processFileDiff,
   analyzeWithAI,
   processReviewCommentReply,
-  processAskCommand
+  processAskCommand,
+  processSecurityReviewCommand
 } = appModule;
+const { constants } = appModule;
 
 // privateKey is now solely set in __tests__/setup.js via process.env.PRIVATE_KEY
 // const validFakePrivateKey = `...`; // Removed
@@ -324,6 +327,7 @@ describe('Command Handlers', () => {
     let currentAppModuleForProbotTest; // Renamed to avoid confusion with top-level appModule
     let reviewCommandSpy;
     let whatCommandSpy;
+    let securityReviewSpy;
 
     beforeEach(() => {
       // process.env.PRIVATE_KEY is set in __tests__/setup.js
@@ -333,6 +337,7 @@ describe('Command Handlers', () => {
 
       reviewCommandSpy = jest.spyOn(currentAppModuleForProbotTest, 'processReviewCommand').mockResolvedValue(undefined);
       whatCommandSpy = jest.spyOn(currentAppModuleForProbotTest, 'processWhatCommand').mockResolvedValue('mock summary');
+      securityReviewSpy = jest.spyOn(currentAppModuleForProbotTest, 'processSecurityReviewCommand').mockResolvedValue(undefined);
     });
 
   it('should trigger review for /review comment by calling the spied processReviewCommand', async () => {
@@ -389,25 +394,64 @@ describe('Command Handlers', () => {
         expect.any(String)
       );
   });
+
+  it('should trigger security review for /review security comment', async () => {
+      const eventPayload = JSON.parse(JSON.stringify(issueCommentPayload));
+      eventPayload.comment.body = '/review security';
+      eventPayload.issue.pull_request = { url: 'https://api.github.com/repos/test-owner/test-repo/pulls/1' };
+      eventPayload.repository.owner.login = mockOwner;
+      eventPayload.repository.name = mockRepo;
+      eventPayload.issue.number = mockPr.number;
+      eventPayload.installation = { id: 2 };
+
+      const tokenNock = nock('https://api.github.com')
+        .post('/app/installations/2/access_tokens')
+        .reply(200, { token: 'test-token' });
+
+      const prNock = nock('https://api.github.com')
+        .get('/repos/' + mockOwner + '/' + mockRepo + '/pulls/' + mockPr.number)
+        .reply(200, { ...mockPr, number: mockPr.number, head: { sha: 'a' }, base: { sha: 'b' }, body: 'PR body text' });
+
+      const filesPayload = [
+        { filename: 'file.js', status: 'modified', changes: 1, additions: 1, deletions: 0, patch: '...' }
+      ];
+      const filesNock = nock('https://api.github.com')
+        .get('/repos/' + mockOwner + '/' + mockRepo + '/pulls/' + mockPr.number + '/files')
+        .reply(200, filesPayload);
+
+      await currentAppModuleForProbotTest.app.receive({ name: 'issue_comment', id: 'test-event-id', payload: eventPayload });
+
+      expect(tokenNock.isDone()).toBe(true);
+      expect(prNock.isDone()).toBe(true);
+      expect(filesNock.isDone()).toBe(true);
+
+      expect(securityReviewSpy).toHaveBeenCalledTimes(1);
+      expect(reviewCommandSpy).toHaveBeenCalledTimes(0);
+      expect(whatCommandSpy).toHaveBeenCalledTimes(0);
+  });
   });
 
   describe('Label Event via Probot', () => {
     let currentAppModuleForLabelTest;
     let reviewCommandSpy;
     let whatCommandSpy;
+    let securityReviewSpy;
 
     beforeEach(() => {
       process.env.ENABLE_LABEL_EVENT = 'true';
       process.env.TRIGGER_LABEL = 'ai-review';
+      process.env.SECURITY_REVIEW_LABEL = 'security-review';
       jest.resetModules();
       currentAppModuleForLabelTest = require('../index.js');
       reviewCommandSpy = jest.spyOn(currentAppModuleForLabelTest, 'processReviewCommand').mockResolvedValue(undefined);
       whatCommandSpy = jest.spyOn(currentAppModuleForLabelTest, 'processWhatCommand').mockResolvedValue('mock summary');
+      securityReviewSpy = jest.spyOn(currentAppModuleForLabelTest, 'processSecurityReviewCommand').mockResolvedValue(undefined);
     });
 
     afterEach(() => {
       delete process.env.ENABLE_LABEL_EVENT;
       delete process.env.TRIGGER_LABEL;
+      delete process.env.SECURITY_REVIEW_LABEL;
     });
 
     it('triggers review when the configured label is added', async () => {
@@ -447,6 +491,41 @@ describe('Command Handlers', () => {
 
       expect(whatCommandSpy).toHaveBeenCalledTimes(1);
       expect(reviewCommandSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it('triggers security review when security-review label is added', async () => {
+      const labelPayload = {
+        action: 'labeled',
+        label: { name: 'security-review' },
+        pull_request: { number: 1, head: { sha: 'a' }, base: { sha: 'b' }, body: 'PR body text' },
+        repository: { name: mockRepo, owner: { login: mockOwner } },
+        installation: { id: 2 }
+      };
+
+      const prNock = nock('https://api.github.com')
+        .get('/repos/' + mockOwner + '/' + mockRepo + '/pulls/1')
+        .reply(200, { ...mockPr });
+
+      const filesPayload = [
+        { filename: 'file.js', status: 'modified', changes: 1, additions: 1, deletions: 0, patch: '...' }
+      ];
+      const filesNock = nock('https://api.github.com')
+        .get('/repos/' + mockOwner + '/' + mockRepo + '/pulls/1/files')
+        .reply(200, filesPayload);
+
+      const tokenNock = nock('https://api.github.com')
+        .post('/app/installations/2/access_tokens')
+        .reply(200, { token: 'test-token' });
+
+      await currentAppModuleForLabelTest.app.receive({ name: 'pull_request', id: 'test-event-id', payload: labelPayload });
+
+      expect(tokenNock.isDone()).toBe(true);
+      expect(prNock.isDone()).toBe(true);
+      expect(filesNock.isDone()).toBe(true);
+
+      expect(securityReviewSpy).toHaveBeenCalledTimes(1);
+      expect(reviewCommandSpy).toHaveBeenCalledTimes(0);
+      expect(whatCommandSpy).toHaveBeenCalledTimes(0);
     });
   });
 
@@ -503,6 +582,43 @@ describe('Command Handlers', () => {
       expect(initialCommentNock.isDone()).toBe(true);
       expect(whatSpy).toHaveBeenCalledTimes(1);
       expect(reviewSpy).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('processSecurityReviewCommand function', () => {
+    it('uses repo override prompt when available', async () => {
+      const octokit = new Octokit({ auth: 'test' });
+      const owner = 'test-owner';
+      const repo = 'test-repo';
+      const pr = { number: 1, head: { sha: 'abc' } };
+      const files = [{ filename: 'file.js', patch: 'diff' }];
+      const customPrompt = 'Custom security for {{repoLanguages}}';
+      const languagesNock = nock('https://api.github.com')
+        .get(`/repos/${owner}/${repo}/languages`)
+        .reply(200, { Python: 100 });
+      const promptNock = nock('https://api.github.com')
+        .get(`/repos/${owner}/${repo}/contents/${constants.SECURITY_PROMPT_FILENAME}`)
+        .query({ ref: pr.head.sha })
+        .reply(200, { content: Buffer.from(customPrompt).toString('base64'), encoding: 'base64' });
+      const commentCreateNock = nock('https://api.github.com')
+        .post(`/repos/${owner}/${repo}/issues/${pr.number}/comments`)
+        .reply(200, { id: 1 });
+      const commentUpdateNock = nock('https://api.github.com')
+        .patch(`/repos/${owner}/${repo}/issues/comments/1`)
+        .reply(200);
+      const analyze = jest.fn().mockResolvedValue('analysis');
+      await processSecurityReviewCommand(octokit, owner, repo, pr, files, { analyzeWithAIDep: analyze });
+      expect(languagesNock.isDone()).toBe(true);
+      expect(promptNock.isDone()).toBe(true);
+      expect(commentCreateNock.isDone()).toBe(true);
+      expect(commentUpdateNock.isDone()).toBe(true);
+      expect(analyze).toHaveBeenCalledWith(
+        expect.stringContaining('Custom security for Python'),
+        expect.any(String),
+        'Security Review',
+        undefined,
+        expect.any(Object)
+      );
     });
   });
 

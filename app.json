@@ -119,6 +119,10 @@
       "description": "Label to trigger review",
       "value": "ai-review"
     },
+    "SECURITY_REVIEW_LABEL": {
+      "description": "Label to trigger security review",
+      "value": "security-review"
+    },
     "REVIEW_COMMENT_KEYWORD": {
       "description": "Keyword to trigger review",
       "value": "/review"
@@ -134,6 +138,10 @@
     "INSTRUCTION_FILENAME": {
       "description": "Instruction file name",
       "value": "AI_REVIEW_INSTRUCTIONS.md"
+    },
+    "SECURITY_PROMPT_FILENAME": {
+      "description": "File name for security review prompt override",
+      "value": "SECURITY_REVIEW_PROMPT.md"
     }
   }
 }
