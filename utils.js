@@ -12,6 +12,16 @@ function truncateToLines(text, maxLines) {
   return lines.slice(0, maxLines).join('\n') + `\n[... ${lines.length - maxLines} more lines ...]`;
 }
 
+const GITHUB_COMMENT_LIMIT = 65536;
+
+function enforceGitHubCommentLimit(text, limit = GITHUB_COMMENT_LIMIT) {
+  if (!text) return '';
+  if (text.length <= limit) return text;
+  const notice = '\n\n---\n⚠️ Output truncated because it exceeded GitHub comment length limits.';
+  const available = Math.max(0, limit - notice.length);
+  return text.slice(0, available) + notice;
+}
+
 function removeLeadingMarkdownHeading(text) {
   if (!text) return '';
   const noHeading = text.replace(/^\s*#{1,6}\s.*\n+/, '');
@@ -97,11 +107,12 @@ function addSuggestionFormatting(comment) {
 module.exports = {
   countTokens,
   truncateToLines,
+  enforceGitHubCommentLimit,
   removeLeadingMarkdownHeading,
   diffAnchor,
   linkLineNumbers,
   getSurroundingLines,
   shouldPostInlineComment,
-   addSuggestionFormatting,
+  addSuggestionFormatting,
 };
 

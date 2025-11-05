@@ -12,6 +12,7 @@ const { structuredLog } = require('./logger');
 const {
   countTokens,
   truncateToLines,
+  enforceGitHubCommentLimit,
   removeLeadingMarkdownHeading,
   linkLineNumbers,
   diffAnchor,
@@ -841,7 +842,8 @@ async function processSecurityReviewCommand(octokit, owner, repo, pr, files, dep
     try {
       const analysis = await analyzeWithAIDep(prompt, combinedDiff, 'Security Review', undefined, logContext);
       const body = `## 🔐 Security Review\n\n${removeLeadingMarkdownHeading(analysis)}\n\n---\n🔍 This is an automated security review.`;
-      await octokit.issues.updateComment({ owner, repo, comment_id: comment.id, body });
+      const finalBody = enforceGitHubCommentLimit(body);
+      await octokit.issues.updateComment({ owner, repo, comment_id: comment.id, body: finalBody });
     } catch (e) {
       await octokit.issues.updateComment({ owner, repo, comment_id: comment.id, body: `❌ Error generating security review: ${e.message}` });
     }

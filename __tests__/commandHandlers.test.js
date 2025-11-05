@@ -620,6 +620,32 @@ describe('Command Handlers', () => {
         expect.any(Object)
       );
     });
+
+    it('truncates long security review comments to GitHub limits', async () => {
+      const octokit = {
+        repos: {
+          listLanguages: jest.fn().mockResolvedValue({ data: {} }),
+          getContent: jest.fn().mockRejectedValue({ status: 404 })
+        },
+        issues: {
+          createComment: jest.fn().mockResolvedValue({ data: { id: 42 } }),
+          updateComment: jest.fn().mockResolvedValue()
+        }
+      };
+      const owner = 'owner';
+      const repo = 'repo';
+      const pr = { number: 7, head: { sha: 'abc123' } };
+      const files = [{ filename: 'file.js', patch: 'diff' }];
+      const longAnalysis = 'A'.repeat(70000);
+      const analyze = jest.fn().mockResolvedValue(longAnalysis);
+
+      await processSecurityReviewCommand(octokit, owner, repo, pr, files, { analyzeWithAIDep: analyze });
+
+      expect(octokit.issues.updateComment).toHaveBeenCalledTimes(1);
+      const updatePayload = octokit.issues.updateComment.mock.calls[0][0];
+      expect(updatePayload.body.length).toBeLessThanOrEqual(65536);
+      expect(updatePayload.body).toContain('⚠️ Output truncated because it exceeded GitHub comment length limits.');
+    });
   });
 
   describe('Review Comment Event via Probot', () => {
