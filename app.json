@@ -83,6 +83,10 @@
       "description": "Max diff lines",
       "value": "500"
     },
+    "SECURITY_REVIEW_MAX_DIFF_LINES": {
+      "description": "Max diff lines for security review",
+      "value": "1500"
+    },
     "MAX_FILE_SIZE": {
       "description": "Max file size",
       "value": "100000"
