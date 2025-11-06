@@ -16,6 +16,12 @@ const GITHUB_COMMENT_LIMIT = 65536;
 
 function enforceGitHubCommentLimit(text, limit = GITHUB_COMMENT_LIMIT) {
   if (!text) return '';
+  const notice = '\n\n---\n⚠️ Output truncated because it exceeded GitHub comment length limits.';
+  if (text.length <= limit - notice.length) return text;
+  const available = Math.max(0, limit - notice.length);
+  return text.slice(0, available) + notice;
+}
+  if (!text) return '';
   if (text.length <= limit) return text;
   const notice = '\n\n---\n⚠️ Output truncated because it exceeded GitHub comment length limits.';
   const available = Math.max(0, limit - notice.length);
