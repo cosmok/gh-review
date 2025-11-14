@@ -33,6 +33,10 @@ function loadPrompt(filename, values = {}) {
 const MAX_FILE_SIZE = parseInt(process.env.MAX_FILE_SIZE || '100000', 10);
 const MAX_DIFF_LENGTH = parseInt(process.env.MAX_DIFF_LENGTH || '8000', 10);
 const MAX_DIFF_LINES = parseInt(process.env.MAX_DIFF_LINES || '500', 10);
+const SECURITY_REVIEW_MAX_DIFF_LINES = parseInt(
+  process.env.SECURITY_REVIEW_MAX_DIFF_LINES || '1500',
+  10
+);
 const MAX_CONTEXT_LINES = parseInt(process.env.MAX_CONTEXT_LINES || '200', 10);
 const REQUEST_TIMEOUT = parseInt(process.env.REQUEST_TIMEOUT || '30000', 10);
 const CONCURRENCY_LIMIT = parseInt(process.env.CONCURRENCY_LIMIT || '3', 10);
@@ -70,13 +74,14 @@ try {
 }
 
 // --- Helper functions (analyzeWithAI, truncateToLines, etc.) remain in module scope ---
-async function analyzeWithAI(prompt, codeSnippet, filePath, context = '', logContext = {}) {
+async function analyzeWithAI(prompt, codeSnippet, filePath, context = '', logContext = {}, options = {}) {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT);
   const startTime = Date.now();
   try {
-    const truncatedSnippet = truncateToLines(codeSnippet, MAX_DIFF_LINES);
-    const truncatedContext = context ? truncateToLines(context, MAX_CONTEXT_LINES) : '';
+    const { maxDiffLines = MAX_DIFF_LINES, maxContextLines = MAX_CONTEXT_LINES } = options;
+    const truncatedSnippet = truncateToLines(codeSnippet, maxDiffLines);
+    const truncatedContext = context ? truncateToLines(context, maxContextLines) : '';
     const message = `# Code Review Task: ${filePath}\n\n## Context\n${truncatedContext || 'No additional context provided.'}\n\n## Changes\n\`\`\`diff\n${truncatedSnippet}\n\`\`\`\n\n## Instructions\n${prompt}\n\n## Guidelines\n- Be specific and reference line numbers from the diff\n- Only report issues you're certain about\n- Suggest concrete improvements when possible`;
     const inputChars = message.length;
     const inputTokens = countTokens(message);
@@ -839,7 +844,14 @@ async function processSecurityReviewCommand(octokit, owner, repo, pr, files, dep
       body: '🔒 Starting AI security review... This may take a few minutes.'
     });
     try {
-      const analysis = await analyzeWithAIDep(prompt, combinedDiff, 'Security Review', undefined, logContext);
+      const analysis = await analyzeWithAIDep(
+        prompt,
+        combinedDiff,
+        'Security Review',
+        undefined,
+        logContext,
+        { maxDiffLines: SECURITY_REVIEW_MAX_DIFF_LINES }
+      );
       const body = `## 🔐 Security Review\n\n${removeLeadingMarkdownHeading(analysis)}\n\n---\n🔍 This is an automated security review.`;
       await octokit.issues.updateComment({ owner, repo, comment_id: comment.id, body });
     } catch (e) {
@@ -1127,6 +1139,7 @@ module.exports = {
     MAX_FILE_SIZE,
     MAX_DIFF_LENGTH,
     MAX_DIFF_LINES,
+    SECURITY_REVIEW_MAX_DIFF_LINES,
     MAX_CONTEXT_LINES,
     REQUEST_TIMEOUT,
     CONCURRENCY_LIMIT,

@@ -617,7 +617,8 @@ describe('Command Handlers', () => {
         expect.any(String),
         'Security Review',
         undefined,
-        expect.any(Object)
+        expect.any(Object),
+        { maxDiffLines: constants.SECURITY_REVIEW_MAX_DIFF_LINES }
       );
     });
   });

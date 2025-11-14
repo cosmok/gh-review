@@ -73,6 +73,8 @@ To override the default security review prompt, add a `SECURITY_REVIEW_PROMPT.md
      - `MAX_FILES_TO_PROCESS` (default 20)
      - `MAX_DIFF_LENGTH`, `MAX_DIFF_LINES`, `MAX_FILE_SIZE`, and
        `MAX_CONTEXT_LINES`
+     - `SECURITY_REVIEW_MAX_DIFF_LINES` to control how many diff lines are
+       sent to the security review prompt (default 1500)
      - `CONCURRENCY_LIMIT` (default 3)
      - `REQUEST_TIMEOUT` in milliseconds (default 30000)
    - (Optional) Control logging with:
