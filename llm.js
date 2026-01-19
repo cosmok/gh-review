@@ -108,6 +108,33 @@ function createClient() {
       }
 
       const candidates = response.candidates || [];
+      const summarizeNonTextParts = (parts = []) => {
+        const summaries = [];
+        for (const part of parts) {
+          if (typeof part.text === 'string' && part.text.length) continue;
+          if (part.functionCall) {
+            summaries.push({ type: 'functionCall', name: part.functionCall.name });
+            continue;
+          }
+          if (part.functionResponse) {
+            summaries.push({ type: 'functionResponse', name: part.functionResponse.name });
+            continue;
+          }
+          if (part.inlineData) {
+            summaries.push({ type: 'inlineData', mimeType: part.inlineData.mimeType });
+            continue;
+          }
+          if (part.fileData) {
+            summaries.push({ type: 'fileData', mimeType: part.fileData.mimeType });
+            continue;
+          }
+          summaries.push({ type: 'unknown' });
+        }
+        return summaries;
+      };
+      const extractTextFromParts = (parts = []) =>
+        parts.map((part) => (typeof part.text === 'string' ? part.text : '')).join('');
+
       for (const [index, cand] of candidates.entries()) {
         if (cand.safetyRatings) {
           structuredLog('INFO', 'Candidate safety ratings', { index, safetyRatings: cand.safetyRatings, repo: logContext.repo, pr: logContext.pr });
@@ -122,18 +149,30 @@ function createClient() {
           structuredLog('WARN', 'Response stopped early because max_output_tokens was too low. Consider increasing max_output_tokens.', { repo: logContext.repo, pr: logContext.pr });
         }
         if (!cand.text && cand.content?.parts?.length) {
-          structuredLog('WARN', 'Candidate text is empty but parts exist. SDK shortcut missed non-text parts. Read raw candidate parts and handle tool calls or metadata explicitly.', { repo: logContext.repo, pr: logContext.pr });
+          const nonTextParts = summarizeNonTextParts(cand.content.parts);
+          if (nonTextParts.length) {
+            structuredLog(
+              'WARN',
+              'Candidate has non-text parts. SDK shortcut omitted tool calls or metadata. Handle raw parts explicitly.',
+              { index, nonTextParts, repo: logContext.repo, pr: logContext.pr }
+            );
+          }
         }
       }
 
       let text = response.text;
       if (!text && candidates.length) {
         text = candidates
-          .map((c) => c.text || (c.content?.parts || []).map((p) => p.text || '').join(''))
+          .map((c) => c.text || extractTextFromParts(c.content?.parts))
           .join('');
       }
 
       if (!text) {
+        const nonTextParts = candidates.flatMap((c) => summarizeNonTextParts(c.content?.parts));
+        if (nonTextParts.length) {
+          structuredLog('WARN', 'LLM returned only non-text parts. Handle tool calls or metadata explicitly.', { nonTextParts, repo: logContext.repo, pr: logContext.pr });
+          throw new Error('LLM returned only non-text parts. Tool calls or metadata were not handled.');
+        }
         structuredLog('WARN', 'LLM returned empty response. If streaming, ensure you iterate over all events and concatenate text deltas.', { repo: logContext.repo, pr: logContext.pr });
         throw new Error('LLM returned empty response');
       }
